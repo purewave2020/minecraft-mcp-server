@@ -257,7 +257,9 @@ test('craft-item crafts successfully when ingredients are available', async (t) 
   const mockConnection = { checkConnectionAndReconnect: sinon.stub().resolves({ connected: true }) } as unknown as BotConnection;
   const factory = new ToolFactory(mockServer, mockConnection);
 
-  const craftStub = sinon.stub().resolves();
+  const craftStub = sinon.stub().callsFake(async () => {
+    inventoryItems.push({ name: 'stick', count: 4, slot: 9 });
+  });
   const mockBot = {
     version: '1.21.8',
     inventory: { items: () => inventoryItems },
@@ -282,4 +284,21 @@ test('uses real minecraft-data recipes for version 1.21.8', async (t) => {
   t.truthy(mcData.recipes);
   const isValid = mcData.recipes && (Array.isArray(mcData.recipes) || typeof mcData.recipes === 'object');
   t.true(isValid);
+});
+
+test('craft-item rejects a craft whose result does not reach inventory', async (t) => {
+  const server = { tool: sinon.stub() } as unknown as McpServer;
+  const connection = { checkConnectionAndReconnect: sinon.stub().resolves({ connected: true }) } as unknown as BotConnection;
+  const factory = new ToolFactory(server, connection);
+  const bot = {
+    version: '1.21.8', inventory: { items: () => [{ name: 'oak_planks', count: 2 }] },
+    craft: sinon.stub().resolves()
+  } as unknown as mineflayer.Bot;
+  registerCraftingTools(factory, () => bot);
+  const executor = (server.tool as sinon.SinonStub).getCalls().find(call => call.args[0] === 'craft-item')!.args[3];
+
+  const result = await executor({ outputItem: 'stick' });
+
+  t.true(result.isError);
+  t.true(result.content[0].text.includes('not confirmed in inventory'));
 });

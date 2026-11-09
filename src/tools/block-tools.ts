@@ -10,10 +10,28 @@ import { coerceCoordinates } from './coordinate-utils.js';
 
 type FaceDirection = 'up' | 'down' | 'north' | 'south' | 'east' | 'west';
 const MAX_FIND_BLOCKS_COUNT = 256;
+const replaceableBlocks = new Set(['air', 'cave_air', 'void_air', 'water', 'lava']);
 
 interface FaceOption {
   direction: string;
   vector: Vec3;
+}
+
+async function approachBlock(bot: mineflayer.Bot, goal: InstanceType<typeof goals.GoalNear>): Promise<void> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      bot.pathfinder.goto(goal),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => {
+          reject(new Error('Navigation to block timed out after 15000ms'));
+          bot.pathfinder.setGoal(null);
+        }, 15000);
+      })
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export function registerBlockTools(factory: ToolFactory, getBot: () => mineflayer.Bot): void {
@@ -40,7 +58,7 @@ export function registerBlockTools(factory: ToolFactory, getBot: () => mineflaye
 
       const blockAtPos = bot.blockAt(placePos);
 
-      if (blockAtPos && blockAtPos.name !== 'air') {
+      if (blockAtPos && !replaceableBlocks.has(blockAtPos.name)) {
         return factory.createResponse(`There's already a block (${blockAtPos.name}) at (${x}, ${y}, ${z})`);
       }
 
@@ -64,10 +82,10 @@ export function registerBlockTools(factory: ToolFactory, getBot: () => mineflaye
         const referencePos = placePos.plus(face.vector);
         const referenceBlock = bot.blockAt(referencePos);
 
-        if (referenceBlock && referenceBlock.name !== 'air') {
+        if (referenceBlock && !replaceableBlocks.has(referenceBlock.name)) {
           if (!bot.canSeeBlock(referenceBlock)) {
             const goal = new goals.GoalNear(referencePos.x, referencePos.y, referencePos.z, 2);
-            await bot.pathfinder.goto(goal);
+            await approachBlock(bot, goal);
           }
 
           await bot.lookAt(placePos, true);
@@ -107,9 +125,14 @@ export function registerBlockTools(factory: ToolFactory, getBot: () => mineflaye
 
       if (!bot.canDigBlock(block) || !bot.canSeeBlock(block)) {
         const goal = new goals.GoalNear(x, y, z, 2);
-        await bot.pathfinder.goto(goal);
+        await approachBlock(bot, goal);
+        if (!bot.canDigBlock(block) || !bot.canSeeBlock(block)) {
+          throw new Error('Block remains out of reach or obstructed after navigation');
+        }
       }
 
+      const tool = bot.pathfinder.bestHarvestTool?.(block);
+      if (tool) await bot.equip(tool, 'hand');
       await bot.dig(block);
       return factory.createResponse(`Dug ${block.name} at (${x}, ${y}, ${z})`);
     }
@@ -134,7 +157,7 @@ export function registerBlockTools(factory: ToolFactory, getBot: () => mineflaye
         return factory.createResponse(`No block information found at position (${x}, ${y}, ${z})`);
       }
 
-      return factory.createResponse(`Found ${block.name} (type: ${block.type}) at position (${block.position.x}, ${block.position.y}, ${block.position.z})`);
+      return factory.createResponse(`Found ${block.name} (type: ${block.type}) at position (${block.position.x}, ${block.position.y}, ${block.position.z}); properties: ${JSON.stringify(block.getProperties?.() ?? {})}`);
     }
   );
 

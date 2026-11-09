@@ -21,11 +21,19 @@ export function registerChatTools(factory: ToolFactory, getBot: () => mineflayer
     "read-chat",
     "Get recent chat messages from players",
     {
-      count: z.number().optional().describe("Number of recent messages to retrieve (default: 10, max: 100)")
+      count: z.number().optional().describe("Number of recent messages to retrieve (default: 10, max: 100)"),
+      username: z.string().optional().describe("Optional exact sender name filter"),
+      format: z.enum(['text', 'json']).optional().describe("Response format (default: text)")
     },
-    async ({ count = 10 }) => {
+    async ({ count = 10, username, format = 'text' }) => {
       const maxCount = Math.min(count, messageStore.getMaxMessages());
-      const messages = messageStore.getRecentMessages(maxCount);
+      const messages = maxCount <= 0 ? [] : messageStore.getRecentMessages(messageStore.getMaxMessages())
+        .filter(message => username === undefined || message.username === username)
+        .slice(-maxCount);
+
+      if (format === 'json') {
+        return factory.createResponse(JSON.stringify({ messages }));
+      }
 
       if (messages.length === 0) {
         return factory.createResponse("No chat messages found");

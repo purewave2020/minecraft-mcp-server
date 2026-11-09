@@ -1,6 +1,7 @@
 import test from 'ava';
 import sinon from 'sinon';
 import { EventEmitter } from 'events';
+import { Vec3 } from 'vec3';
 import { registerFurnaceTools } from '../src/tools/furnace-tools.js';
 import { ToolFactory } from '../src/tool-factory.js';
 import { BotConnection } from '../src/bot-connection.js';
@@ -161,4 +162,57 @@ test('smelt-item returns validation error for non-positive counts', async (t) =>
   t.true(fuelCountResult.isError);
   t.true(fuelCountResult.content[0].text.includes('Invalid tool arguments'));
   t.true(fuelCountResult.content[0].text.includes('fuelCount'));
+});
+
+test('inspect-furnace collects completed output without requiring more ingredients', async (t) => {
+  const mockServer = { tool: sinon.stub() } as unknown as McpServer;
+  const connection = {
+    checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
+  } as unknown as BotConnection;
+  const factory = new ToolFactory(mockServer, connection);
+  const output = createMockItem({ name: 'iron_ingot', count: 8, type: 100, metadata: 0 });
+  const furnace = {
+    inputItem: sinon.stub().returns(null), fuelItem: sinon.stub().returns(null),
+    outputItem: sinon.stub().returns(output), takeOutput: sinon.stub().resolves(output),
+    close: sinon.stub().resolves(), progress: 0, fuel: 0
+  };
+  const bot = {
+    entity: { position: new Vec3(0, 64, 0) },
+    blockAt: sinon.stub().returns({ name: 'furnace', position: new Vec3(1, 64, 0) }),
+    openFurnace: sinon.stub().resolves(furnace)
+  } as unknown as mineflayer.Bot;
+  registerFurnaceTools(factory, () => bot);
+  const executor = (mockServer.tool as sinon.SinonStub).getCalls()
+    .find(call => call.args[0] === 'inspect-furnace')!.args[3];
+
+  const result = await executor({ x: 1, y: 64, z: 0, takeOutput: true });
+
+  t.deepEqual(JSON.parse(result.content[0].text).taken, { name: 'iron_ingot', count: 8 });
+  t.true(furnace.close.calledOnce);
+});
+
+test('inspect-furnace closes the window if collection fails', async (t) => {
+  const mockServer = { tool: sinon.stub() } as unknown as McpServer;
+  const connection = {
+    checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
+  } as unknown as BotConnection;
+  const factory = new ToolFactory(mockServer, connection);
+  const furnace = {
+    outputItem: sinon.stub().returns({ name: 'iron_ingot', count: 1 }),
+    takeOutput: sinon.stub().rejects(new Error('collection failed')), close: sinon.stub().resolves()
+  };
+  const bot = {
+    entity: { position: new Vec3(0, 64, 0) },
+    blockAt: sinon.stub().returns({ name: 'furnace', position: new Vec3(1, 64, 0) }),
+    openFurnace: sinon.stub().resolves(furnace)
+  } as unknown as mineflayer.Bot;
+  registerFurnaceTools(factory, () => bot);
+  const executor = (mockServer.tool as sinon.SinonStub).getCalls()
+    .find(call => call.args[0] === 'inspect-furnace')!.args[3];
+
+  const result = await executor({ x: 1, y: 64, z: 0, takeOutput: true });
+
+  t.true(result.isError);
+  t.true(result.content[0].text.includes('collection failed'));
+  t.true(furnace.close.calledOnce);
 });

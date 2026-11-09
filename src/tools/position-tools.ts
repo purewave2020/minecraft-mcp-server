@@ -61,6 +61,16 @@ export function registerPositionTools(factory: ToolFactory, getBot: () => minefl
         } else {
           await gotoPromise;
         }
+        const actual = bot.entity?.position;
+        if (actual) {
+          const node = actual.floored();
+          const distanceSquared = (node.x - Math.floor(x)) ** 2 +
+            (node.y - Math.floor(y)) ** 2 + (node.z - Math.floor(z)) ** 2;
+          if (distanceSquared > range ** 2) {
+            bot.pathfinder.setGoal(null);
+            throw new Error('Navigation ended without reaching the requested position');
+          }
+        }
         return factory.createResponse(`Successfully moved to position near (${x}, ${y}, ${z})`);
       } catch (error) {
         if (timedOut) {

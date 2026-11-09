@@ -310,3 +310,98 @@ test('find-blocks clamps oversized count before calling bot.findBlocks', async (
   const findBlocksArgs = findBlocksStub.firstCall.args[0];
   t.is(findBlocksArgs.count, 256);
 });
+
+test('dig-block equips the best available harvest tool before mining', async (t) => {
+  const mockServer = { tool: sinon.stub() } as unknown as McpServer;
+  const connection = {
+    checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
+  } as unknown as BotConnection;
+  const factory = new ToolFactory(mockServer, connection);
+  const pickaxe = { name: 'stone_pickaxe' };
+  const block = { name: 'stone', position: new Vec3(1, 64, 0) };
+  const bot = {
+    blockAt: sinon.stub().returns(block), canDigBlock: sinon.stub().returns(true),
+    canSeeBlock: sinon.stub().returns(true), pathfinder: { bestHarvestTool: sinon.stub().returns(pickaxe) },
+    equip: sinon.stub().resolves(), dig: sinon.stub().resolves()
+  };
+  registerBlockTools(factory, () => bot as unknown as mineflayer.Bot);
+  const executor = (mockServer.tool as sinon.SinonStub).getCalls()
+    .find(call => call.args[0] === 'dig-block')!.args[3];
+
+  await executor({ x: 1, y: 64, z: 0 });
+
+  t.true(bot.equip.calledOnceWith(pickaxe, 'hand'));
+  t.true(bot.equip.calledBefore(bot.dig));
+});
+
+test('place-block replaces water using an adjacent solid reference', async (t) => {
+  const mockServer = { tool: sinon.stub() } as unknown as McpServer;
+  const connection = {
+    checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
+  } as unknown as BotConnection;
+  const factory = new ToolFactory(mockServer, connection);
+  const water = { name: 'water', position: new Vec3(1, 64, 0) };
+  const stone = { name: 'stone', position: new Vec3(1, 63, 0) };
+  const bot = {
+    entity: { position: new Vec3(0, 64, 0) },
+    blockAt: sinon.stub().callsFake((p: Vec3) => p.y === 63 ? stone : water),
+    canSeeBlock: sinon.stub().returns(true), lookAt: sinon.stub().resolves(),
+    placeBlock: sinon.stub().resolves()
+  };
+  registerBlockTools(factory, () => bot as unknown as mineflayer.Bot);
+  const executor = (mockServer.tool as sinon.SinonStub).getCalls()
+    .find(call => call.args[0] === 'place-block')!.args[3];
+
+  await executor({ x: 1, y: 64, z: 0 });
+
+  t.true(bot.placeBlock.calledOnce);
+  t.is(bot.placeBlock.firstCall.args[0], stone);
+  t.true(bot.placeBlock.firstCall.args[1].equals(new Vec3(0, 1, 0)));
+});
+
+test.serial('dig-block cancels navigation when an obstructed block cannot be reached in time', async (t) => {
+  const clock = sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  t.teardown(() => clock.restore());
+  const mockServer = { tool: sinon.stub() } as unknown as McpServer;
+  const connection = {
+    checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
+  } as unknown as BotConnection;
+  const factory = new ToolFactory(mockServer, connection);
+  const bot = {
+    blockAt: sinon.stub().returns({ name: 'stone' }), canDigBlock: sinon.stub().returns(false),
+    pathfinder: { goto: sinon.stub().returns(new Promise(() => {})), setGoal: sinon.stub() }
+  };
+  registerBlockTools(factory, () => bot as unknown as mineflayer.Bot);
+  const executor = (mockServer.tool as sinon.SinonStub).getCalls()
+    .find(call => call.args[0] === 'dig-block')!.args[3];
+
+  const pending = executor({ x: 1, y: 64, z: 0 });
+  await clock.tickAsync(15001);
+  const result = await pending;
+
+  t.true(result.isError);
+  t.true(result.content[0].text.includes('Navigation to block timed out'));
+  t.true(bot.pathfinder.setGoal.calledOnceWith(null));
+});
+
+test('dig-block refuses an obstructed target after a falsely resolved path', async (t) => {
+  const server = { tool: sinon.stub() } as unknown as McpServer;
+  const connection = {
+    checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
+  } as unknown as BotConnection;
+  const factory = new ToolFactory(server, connection);
+  const bot = {
+    blockAt: sinon.stub().returns({ name: 'stone' }),
+    canDigBlock: sinon.stub().returns(false), canSeeBlock: sinon.stub().returns(false),
+    pathfinder: { goto: sinon.stub().resolves() }, dig: sinon.stub().resolves()
+  };
+  registerBlockTools(factory, () => bot as unknown as mineflayer.Bot);
+  const executor = (server.tool as sinon.SinonStub).getCalls()
+    .find(call => call.args[0] === 'dig-block')!.args[3];
+
+  const result = await executor({ x: 10, y: 64, z: 0 });
+
+  t.true(result.isError);
+  t.true(result.content[0].text.includes('out of reach or obstructed'));
+  t.false(bot.dig.called);
+});

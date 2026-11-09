@@ -421,7 +421,7 @@ export function registerCraftingTools(factory: ToolFactory, getBot: () => minefl
       const table = findNearbyCraftingTable(bot, mcData);
       const candidatesFromBotNoTable = collectCandidateRecipesFromBot(bot, mcData, outputQuery, itemsById, null);
       const candidatesFromBotWithTable = table ? collectCandidateRecipesFromBot(bot, mcData, outputQuery, itemsById, table) : [];
-      const candidatesFromBot = candidatesFromBotNoTable.length > 0 ? candidatesFromBotNoTable : candidatesFromBotWithTable;
+      const candidatesFromBot = candidatesFromBotWithTable.length > 0 ? candidatesFromBotWithTable : candidatesFromBotNoTable;
       const candidates = candidatesFromBot.length > 0 ? candidatesFromBot : collectCandidateRecipes(recipes, outputQuery, itemsById);
 
       for (let attempt = 0; attempt < amount; attempt++) {
@@ -444,10 +444,19 @@ export function registerCraftingTools(factory: ToolFactory, getBot: () => minefl
           }
 
           try {
+            const beforeCount = currentInventory.filter(item => item.name === candidate.resultName)
+              .reduce((sum, item) => sum + item.count, 0);
             if (candidate.craftingTable) {
               await bot.craft(candidate.recipe as Parameters<typeof bot.craft>[0], 1, candidate.craftingTable as Parameters<typeof bot.craft>[2]);
             } else {
               await bot.craft(candidate.recipe as Parameters<typeof bot.craft>[0], 1);
+            }
+            const syncBot = bot as typeof bot & { _syncWindow?: (window: typeof bot.inventory) => Promise<void> };
+            if (syncBot._syncWindow && !bot.currentWindow) await syncBot._syncWindow(bot.inventory);
+            const afterCount = bot.inventory.items().filter(item => item.name === candidate.resultName)
+              .reduce((sum, item) => sum + item.count, 0);
+            if (afterCount < beforeCount + candidate.resultCount) {
+              return factory.createErrorResponse(`Crafting ${candidate.resultName} was not confirmed in inventory; inspect crafting slots before retrying`);
             }
             craftedCount++;
             craftedThisAttempt = true;

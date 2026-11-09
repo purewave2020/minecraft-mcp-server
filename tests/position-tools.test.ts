@@ -236,3 +236,24 @@ test('move-to-position preserves pathfinder error when not timing out', async (t
   t.true(result.content[0].text.includes('Path was stopped before it could be completed'));
   t.true((mockBot.pathfinder!.stop as sinon.SinonStub).notCalled);
 });
+
+test('move-to-position rejects a resolved path that did not reach its destination', async (t) => {
+  const server = { tool: sinon.stub() } as unknown as McpServer;
+  const connection = {
+    checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
+  } as unknown as BotConnection;
+  const factory = new ToolFactory(server, connection);
+  const bot = {
+    entity: { position: new Vec3(0, 64, 0) },
+    pathfinder: { goto: sinon.stub().resolves(), setGoal: sinon.stub() }
+  };
+  registerPositionTools(factory, () => bot as unknown as mineflayer.Bot);
+  const executor = (server.tool as sinon.SinonStub).getCalls()
+    .find(call => call.args[0] === 'move-to-position')!.args[3];
+
+  const result = await executor({ x: 10, y: 64, z: 0, range: 1 });
+
+  t.true(result.isError);
+  t.true(result.content[0].text.includes('without reaching'));
+  t.true(bot.pathfinder.setGoal.calledOnceWith(null));
+});

@@ -9,6 +9,34 @@ const FURNACE_BLOCKS = new Set(['furnace', 'blast_furnace', 'smoker']);
 
 export function registerFurnaceTools(factory: ToolFactory, getBot: () => mineflayer.Bot): void {
   factory.registerTool(
+    'inspect-furnace',
+    'Inspect furnace contents and optionally collect finished output without adding more ingredients',
+    {
+      x: z.coerce.number(), y: z.coerce.number(), z: z.coerce.number(),
+      takeOutput: z.boolean().optional()
+    },
+    async ({ x, y, z, takeOutput = false }) => {
+      ({ x, y, z } = coerceCoordinates(x, y, z));
+      const bot = getBot();
+      const block = bot.blockAt(new Vec3(x, y, z));
+      if (!block || !FURNACE_BLOCKS.has(block.name)) throw new Error('No furnace at this position');
+      if (bot.entity.position.distanceTo(block.position) > 4.5) throw new Error('Furnace is out of reach');
+      const furnace = await bot.openFurnace(block);
+      const describe = (item: Item | null) => item ? { name: item.name, count: item.count } : null;
+      try {
+        const taken = takeOutput && furnace.outputItem() ? await furnace.takeOutput() : null;
+        return factory.createResponse(JSON.stringify({
+          input: describe(furnace.inputItem()), fuel: describe(furnace.fuelItem()),
+          output: describe(furnace.outputItem()), taken: describe(taken),
+          progress: furnace.progress, fuelRemaining: furnace.fuel
+        }));
+      } finally {
+        await furnace.close();
+      }
+    }
+  );
+
+  factory.registerTool(
     "smelt-item",
     "Smelt items using a furnace-like block",
     {

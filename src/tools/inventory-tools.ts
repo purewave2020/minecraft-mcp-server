@@ -10,6 +10,42 @@ interface InventoryItem {
 
 export function registerInventoryTools(factory: ToolFactory, getBot: () => mineflayer.Bot): void {
   factory.registerTool(
+    'share-item',
+    'Drop an exact number of carried items toward a nearby player for them to collect',
+    {
+      itemName: z.string().trim().min(1),
+      count: z.number().int().min(1).max(64),
+      recipient: z.string().trim().min(1)
+    },
+    async ({ itemName, count, recipient }) => {
+      const bot = getBot();
+      const target = Object.values(bot.entities).find(entity => entity.username === recipient && entity.isValid !== false);
+      if (!target || target === bot.entity) throw new Error('Recipient is not an available nearby player');
+      if (bot.entity.position.distanceTo(target.position) > 4) throw new Error('Recipient is out of sharing reach');
+      const eye = bot.entity.position.offset(0, 1.62, 0);
+      const direction = target.position.offset(0, 1, 0).minus(eye);
+      if (bot.world.raycast(eye, direction.normalize(), direction.norm())) throw new Error('Recipient is obstructed');
+      const matching = bot.inventory.items().filter(item => item.name === itemName);
+      const item = matching[0];
+      const beforeCount = matching.reduce((sum, item) => sum + item.count, 0);
+      if (!item || beforeCount < count) throw new Error(`Not enough ${itemName}: have ${beforeCount}, need ${count}`);
+      const matchingMetadataCount = matching.filter(candidate => candidate.type === item.type && candidate.metadata === item.metadata)
+        .reduce((sum, candidate) => sum + candidate.count, 0);
+      if (matchingMetadataCount < count) throw new Error('Requested items have different metadata; share a smaller amount');
+      await bot.lookAt(target.position.offset(0, 1, 0), true);
+      // The server needs the new yaw before handling the inventory drop packet.
+      await bot.waitForTicks(2);
+      await bot.toss(item.type, item.metadata ?? null, count);
+      const syncBot = bot as typeof bot & { _syncWindow?: (window: typeof bot.inventory) => Promise<void> };
+      if (syncBot._syncWindow) await syncBot._syncWindow(bot.inventory);
+      const afterCount = bot.inventory.items().filter(item => item.name === itemName)
+        .reduce((sum, item) => sum + item.count, 0);
+      if (afterCount > beforeCount - count) throw new Error('Item drop was not confirmed; inspect inventory and nearby drops before retrying');
+      return factory.createResponse(`Dropped ${count} ${itemName} toward ${recipient}; recipient pickup is not confirmed`);
+    }
+  );
+
+  factory.registerTool(
     "list-inventory",
     "List all items in the bot's inventory",
     {},

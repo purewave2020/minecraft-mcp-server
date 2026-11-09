@@ -26,7 +26,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",
     "minecraft-data": "^3.119.0",
-    "mineflayer": "4.39.0",
+    "mineflayer": "https://codeload.github.com/PrismarineJS/mineflayer/tar.gz/5a252e6d258882b042e60e21c37d552cdf3b3380",
     "mineflayer-pathfinder": "^2.4.2",
     "vec3": "^0.1.8",
     "yargs": "^18.0.0",

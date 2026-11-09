@@ -2,7 +2,6 @@ import mineflayer from 'mineflayer';
 import pathfinderPkg from 'mineflayer-pathfinder';
 const { pathfinder, Movements } = pathfinderPkg;
 import minecraftData from 'minecraft-data';
-import { setupClientTickEnd } from './client-tick-end.js';
 
 const SUPPORTED_MINECRAFT_VERSION = mineflayer.latestSupportedVersion;
 
@@ -74,8 +73,11 @@ export class BotConnection {
 
       const mcData = minecraftData(bot.version);
       const defaultMove = new Movements(bot, mcData);
+      defaultMove.canDig = false;
+      defaultMove.allow1by1towers = false;
+      defaultMove.maxDropDown = 2;
+      defaultMove.liquidCost = 8;
       bot.pathfinder.setMovements(defaultMove);
-      setupClientTickEnd(bot);
 
       bot.chat('LLM-powered bot ready to receive instructions!');
       this.callbacks.onLog('info', `Bot connected successfully. Username: ${this.config.username}, Server: ${this.config.host}:${this.config.port}`);
