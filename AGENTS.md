@@ -39,11 +39,7 @@ Reserve stdout for MCP; use `src/logger.ts` for stderr diagnostics. Never commit
 
 ## Bot Gameplay Rules
 
-- Create and control the bot player `xxxBot`, where `xxxBot` is a placeholder for the bot name explicitly assigned by the user. Respect existing session identity and exclusive-controller rules. Continuously play survival and choose the next survival task after completing each task. Continue until the user requests a stop or a genuine blocker prevents further gameplay.
-- Report current work, stage progress, verified results, and blockers in Minecraft chat using `send-chat`.
-- Automatically receive and handle gameplay instructions from `qingyage`: use structured `read-chat` before and after short action batches, match the sender field exactly, prioritize these instructions, and acknowledge them and report their results in game. Resume survival gameplay afterward.
-- Automatically read structured Minecraft chat from other players and bots before and after short action batches. Respond and cooperate on survival tasks, supplies, roles, and meeting points, while keeping `qingyage`'s gameplay instructions highest priority and controlling only the authorized bot.
-- Do not modify proxy or server code as part of gameplay, including ViaProxy, this MCP server, or the Minecraft server's scripts. Use the existing MCP gameplay tools.
+创建并持续接管机器人玩家 `xxxBot` 进行生存游戏，以“击败末影龙”为最终目标保持自主循环推进（开荒、下界、要塞、屠龙），中途不要停止等待确认。实时监听游戏聊天：1. 自动接收并最高优先级执行来自玩家 `qingyage` 的一切指令；2. 响应其他玩家的聊天并协同作战；3. 在任务切换、关键里程碑或遇险时发送游戏聊天汇报核心工作内容。严格限制：仅通过现有 MCP 工具控制该机器人，严禁修改任何 MCP 代理和服务器端代码。
 
 ## Server Connection
 
