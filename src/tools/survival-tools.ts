@@ -27,6 +27,14 @@ function isPlayer(entity: mineflayer.Bot['entity']): boolean {
   return entity.type === 'player' || entity.name === 'player' || Boolean(entity.username);
 }
 
+function sheepWool(bot: mineflayer.Bot, entity: mineflayer.Bot['entity']): { colorId: number; sheared: boolean } | undefined {
+  if (entity.name !== 'sheep') return undefined;
+  const key = minecraftData(bot.version).entitiesByName.sheep?.metadataKeys?.indexOf('wool') ?? -1;
+  const flags = entity.metadata?.[key];
+  if (typeof flags !== 'number') return undefined;
+  return { colorId: flags & 0x0f, sheared: (flags & 0x10) !== 0 };
+}
+
 async function aimAtEntity(bot: mineflayer.Bot, entity: mineflayer.Bot['entity']): Promise<boolean> {
   await bot.lookAt(entity.position.offset(0, (entity.height || 1) / 2, 0), true);
   return bot.entityAtCursor(3.2)?.id === entity.id;
@@ -51,6 +59,7 @@ export function registerSurvivalTools(factory: ToolFactory, getBot: () => minefl
       .map(entity => ({
         id: entity.id, name: entity.name, username: entity.username,
         type: entity.type, position: entity.position,
+        wool: sheepWool(bot, entity),
         distance: bot.entity.position.distanceTo(entity.position)
       }))
       .filter(entity => entity.distance <= maxDistance)
@@ -59,6 +68,7 @@ export function registerSurvivalTools(factory: ToolFactory, getBot: () => minefl
     return factory.createResponse(JSON.stringify({
       health: bot.health, food: bot.food, oxygen: bot.oxygenLevel,
       position: bot.entity.position, dimension: bot.game.dimension,
+      isSleeping: bot.isSleeping,
       timeOfDay: bot.time.timeOfDay, isDay: bot.time.isDay,
       defenseEnabled: defenses.has(bot), escaping: defenses.get(bot)?.escaping ?? false,
       surfacing: defenses.get(bot)?.surfacing ?? false,
@@ -137,6 +147,9 @@ export function registerSurvivalTools(factory: ToolFactory, getBot: () => minefl
     if (isPlayer(target)) throw new Error('Player interaction is disabled');
     if (bot.entity.position.distanceTo(target.position) > 3) throw new Error('Entity is out of reach; move closer first');
     if (!(await aimAtEntity(bot, target))) throw new Error('Entity is obstructed; move to a clear position first');
+    // Vanilla sends interact_at before interact. ViaBackwards maps the first
+    // packet to 26.1+ interaction and drops the second as a duplicate.
+    await bot.activateEntityAt(target, target.position.offset(0, (target.height || 1) / 2, 0));
     await bot.activateEntity(target);
     await delay(200);
     return factory.createResponse(`Interacted with ${target.name ?? 'entity'} ${entityId}`);
@@ -171,16 +184,17 @@ export function registerSurvivalTools(factory: ToolFactory, getBot: () => minefl
 
   factory.registerTool('interact-block', 'Activate a nearby block or sleep in a nearby bed', {
     x: z.coerce.number(), y: z.coerce.number(), z: z.coerce.number(),
-    action: z.enum(['activate', 'sleep']).optional()
+    action: z.enum(['activate', 'sleep', 'wake']).optional()
   }, async ({ x, y, z, action = 'activate' }) => {
     ({ x, y, z } = coerceCoordinates(x, y, z));
     const bot = getBot();
     const block = bot.blockAt(new Vec3(x, y, z));
     if (!block || block.name === 'air') throw new Error('No block to interact with');
     if (bot.entity.position.distanceTo(block.position) > 4.5) throw new Error('Block is out of reach; move closer first');
-    if (action === 'sleep') {
+    if (action === 'sleep' || action === 'wake') {
       if (!block.name.endsWith('_bed')) throw new Error('Sleeping requires a bed');
-      await bot.sleep(block);
+      if (action === 'wake') await bot.wake();
+      else await bot.sleep(block);
     } else {
       const shape = block.shapes[0] ?? [0, 0, 0, 1, 1, 1];
       await bot.lookAt(block.position.offset(
@@ -195,7 +209,7 @@ export function registerSurvivalTools(factory: ToolFactory, getBot: () => minefl
       await bot.activateBlock(hit, faces[hit.face], hit.intersect.minus(hit.position));
       await delay(100);
     }
-    return factory.createResponse(`${action === 'sleep' ? 'Sleeping in' : 'Activated'} ${block.name}`);
+    return factory.createResponse(`${action === 'sleep' ? 'Sleeping in' : action === 'wake' ? 'Woke from' : 'Activated'} ${block.name}`);
   });
 
   factory.registerTool('use-item', 'Use the held item, such as a bow or shield, for a bounded duration', {

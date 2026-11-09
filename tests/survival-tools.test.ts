@@ -28,7 +28,8 @@ function setup() {
     world: { raycast: sinon.stub().returns(null) },
     pathfinder: { goal: null as unknown, goto: sinon.stub().resolves(), setGoal: sinon.stub() },
     stopDigging: sinon.stub(), clearControlStates: sinon.stub(), setControlState: sinon.stub(), chat: sinon.stub(),
-    blockAt: sinon.stub(), activateBlock: sinon.stub().resolves(), activateEntity: sinon.stub().resolves(), sleep: sinon.stub().resolves()
+    blockAt: sinon.stub(), activateBlock: sinon.stub().resolves(), activateEntity: sinon.stub().resolves(),
+    activateEntityAt: sinon.stub().resolves(), sleep: sinon.stub().resolves(), wake: sinon.stub().resolves()
   });
   registerSurvivalTools(factory, () => bot as unknown as mineflayer.Bot);
   return { bot, run: (name: string, args: Record<string, unknown> = {}) => tools.get(name)!(args) };
@@ -42,6 +43,15 @@ test('status reports the actual vitals and inventory', async (t) => {
   t.is(status.health, 20);
   t.is(status.food, 10);
   t.deepEqual(status.inventory, [{ name: 'bread', count: 3 }]);
+});
+
+test('status distinguishes a sheep with wool from a sheared sheep using version metadata', async (t) => {
+  const { bot, run } = setup();
+  bot.entities[2] = { id: 2, name: 'sheep', position: new Vec3(1, 64, 0), metadata: { 17: 0 } };
+  bot.entities[3] = { id: 3, name: 'sheep', position: new Vec3(2, 64, 0), metadata: { 17: 31 } };
+  const status = JSON.parse((await run('get-status')).content[0].text);
+  t.deepEqual(status.entities[0].wool, { colorId: 0, sheared: false });
+  t.deepEqual(status.entities[1].wool, { colorId: 15, sheared: true });
 });
 
 test('melee refuses to attack a player', async (t) => {
@@ -68,6 +78,7 @@ test('creature interaction refuses players and unavailable entities', async (t) 
   await t.throwsAsync(run('interact-entity', { entityId: 2 }), { message: 'Player interaction is disabled' });
   await t.throwsAsync(run('interact-entity', { entityId: 3 }), { message: 'Entity is no longer available' });
   t.false(bot.activateEntity.called);
+  t.false(bot.activateEntityAt.called);
 });
 
 test('creature interaction requires reach and a clear aim', async (t) => {
@@ -78,6 +89,7 @@ test('creature interaction requires reach and a clear aim', async (t) => {
   sheep.position = new Vec3(2, 64, 0);
   await t.throwsAsync(run('interact-entity', { entityId: 2 }), { message: /obstructed/ });
   t.false(bot.activateEntity.called);
+  t.false(bot.activateEntityAt.called);
 });
 
 test('creature interaction uses the equipped item on the aimed sheep', async (t) => {
@@ -86,6 +98,8 @@ test('creature interaction uses the equipped item on the aimed sheep', async (t)
   bot.entities[2] = sheep;
   bot.entityAtCursor.returns(sheep);
   const result = await run('interact-entity', { entityId: 2 });
+  t.true(bot.activateEntityAt.calledOnceWith(sheep, new Vec3(2, 64.65, 0)));
+  t.true(bot.activateEntityAt.calledBefore(bot.activateEntity));
   t.true(bot.activateEntity.calledOnceWith(sheep));
   t.regex(result.content[0].text, /sheep 2/);
 });
@@ -125,6 +139,18 @@ test('sleeping refuses a non-bed block', async (t) => {
   bot.blockAt.returns({ name: 'dirt', position: new Vec3(1, 64, 0) });
   await t.throwsAsync(run('interact-block', { x: 1, y: 64, z: 0, action: 'sleep' }), { message: 'Sleeping requires a bed' });
   t.false(bot.sleep.called);
+});
+
+test('bed interaction can wake the bot and status reports whether it is sleeping', async (t) => {
+  const { bot, run } = setup();
+  Object.assign(bot, { isSleeping: true });
+  bot.blockAt.returns({ name: 'black_bed', position: new Vec3(1, 64, 0) });
+  const status = JSON.parse((await run('get-status')).content[0].text);
+  t.true(status.isSleeping);
+  const result = await run('interact-block', { x: 1, y: 64, z: 0, action: 'wake' });
+  t.true(bot.wake.calledOnce);
+  t.false(bot.sleep.called);
+  t.regex(result.content[0].text, /Woke from black_bed/);
 });
 
 test('item use is released when activation fails', async (t) => {
