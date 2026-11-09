@@ -12,6 +12,7 @@ test('registerPositionTools registers get-position tool', (t) => {
     tool: sinon.stub()
   } as unknown as McpServer;
   const mockConnection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   const factory = new ToolFactory(mockServer, mockConnection);
@@ -32,6 +33,7 @@ test('registerPositionTools registers move-to-position tool', (t) => {
     tool: sinon.stub()
   } as unknown as McpServer;
   const mockConnection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   const factory = new ToolFactory(mockServer, mockConnection);
@@ -52,6 +54,7 @@ test('get-position returns current bot position', async (t) => {
     tool: sinon.stub()
   } as unknown as McpServer;
   const mockConnection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   const factory = new ToolFactory(mockServer, mockConnection);
@@ -81,6 +84,7 @@ test('move-to-position returns error when pathfinding fails', async (t) => {
     tool: sinon.stub()
   } as unknown as McpServer;
   const mockConnection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   const factory = new ToolFactory(mockServer, mockConnection);
@@ -116,6 +120,7 @@ test.serial('move-to-position returns timeout error and stops pathfinder', async
     tool: sinon.stub()
   } as unknown as McpServer;
   const mockConnection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   const factory = new ToolFactory(mockServer, mockConnection);
@@ -148,6 +153,7 @@ test('move-to-position succeeds without timeout and does not stop pathfinder', a
     tool: sinon.stub()
   } as unknown as McpServer;
   const mockConnection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   const factory = new ToolFactory(mockServer, mockConnection);
@@ -181,6 +187,7 @@ test.serial('move-to-position succeeds before timeout and does not stop pathfind
     tool: sinon.stub()
   } as unknown as McpServer;
   const mockConnection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   const factory = new ToolFactory(mockServer, mockConnection);
@@ -212,6 +219,7 @@ test('move-to-position preserves pathfinder error when not timing out', async (t
     tool: sinon.stub()
   } as unknown as McpServer;
   const mockConnection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   const factory = new ToolFactory(mockServer, mockConnection);
@@ -240,6 +248,7 @@ test('move-to-position preserves pathfinder error when not timing out', async (t
 test('move-to-position rejects a resolved path that did not reach its destination', async (t) => {
   const server = { tool: sinon.stub() } as unknown as McpServer;
   const connection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   const factory = new ToolFactory(server, connection);

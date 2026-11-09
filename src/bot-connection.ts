@@ -1,19 +1,14 @@
 import mineflayer from 'mineflayer';
 import pathfinderPkg from 'mineflayer-pathfinder';
-const { pathfinder, Movements } = pathfinderPkg;
 import minecraftData from 'minecraft-data';
+import fs from 'node:fs';
+import path from 'node:path';
+import { identityKey, runtimeDirectory, writePrivateJson } from './runtime-state.js';
 
+const { pathfinder, Movements } = pathfinderPkg;
 const SUPPORTED_MINECRAFT_VERSION = mineflayer.latestSupportedVersion;
-
 type ConnectionState = 'connected' | 'connecting' | 'disconnected';
-
-interface BotConfig {
-  host: string;
-  port: number;
-  username: string;
-  version?: string;
-}
-
+interface BotConfig { host: string; port: number; username: string; version?: string; }
 interface ConnectionCallbacks {
   onLog: (level: string, message: string) => void;
   onChatMessage: (username: string, message: string) => void;
@@ -22,197 +17,169 @@ interface ConnectionCallbacks {
 export class BotConnection {
   private bot: mineflayer.Bot | null = null;
   private state: ConnectionState = 'disconnected';
-  private config: BotConfig;
-  private callbacks: ConnectionCallbacks;
   private isReconnecting = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private readonly reconnectDelayMs: number;
+  private connectTimer: ReturnType<typeof setTimeout> | null = null;
+  private stopped = false;
+  private failures = 0;
+  private blockedReason?: string;
+  private lastDisconnect?: string;
+  private connectedAt?: string;
+  private spawnListeners = new Set<(bot: mineflayer.Bot) => void>();
 
-  constructor(config: BotConfig, callbacks: ConnectionCallbacks, reconnectDelayMs = 2000) {
-    this.config = config;
-    this.callbacks = callbacks;
-    this.reconnectDelayMs = reconnectDelayMs;
-  }
+  constructor(private config: BotConfig, private callbacks: ConnectionCallbacks, private readonly reconnectDelayMs = 2000) {}
 
-  getBot(): mineflayer.Bot | null {
-    return this.bot;
+  getBot(): mineflayer.Bot | null { return this.bot; }
+  getState(): ConnectionState { return this.state; }
+  getConfig(): BotConfig { return this.config; }
+  isConnected(): boolean { return this.state === 'connected' && this.bot !== null; }
+  onSpawn(callback: (bot: mineflayer.Bot) => void): void {
+    this.spawnListeners.add(callback);
+    if (this.isConnected()) callback(this.bot!);
   }
-
-  getState(): ConnectionState {
-    return this.state;
+  getStatus(): Record<string, unknown> {
+    return { observedAt: new Date().toISOString(), username: this.config.username, state: this.state,
+      connected: this.isConnected(), protocolState: this.bot?._client.state, connectedAt: this.connectedAt,
+      lastDisconnect: this.lastDisconnect, reconnectPending: this.reconnectTimer !== null,
+      failures: this.failures, blockedReason: this.blockedReason };
   }
-
-  getConfig(): BotConfig {
-    return this.config;
+  getPreference<T>(key: string, fallback: T): T {
+    try { return JSON.parse(fs.readFileSync(this.preferencePath(), 'utf8'))[key] ?? fallback; }
+    catch { return fallback; }
   }
-
-  isConnected(): boolean {
-    return this.state === 'connected';
+  setPreference(key: string, value: unknown): void {
+    let preferences: Record<string, unknown> = {};
+    try { preferences = JSON.parse(fs.readFileSync(this.preferencePath(), 'utf8')); } catch { /* First run. */ }
+    writePrivateJson(this.preferencePath(), { ...preferences, [key]: value });
   }
+  private preferencePath(): string { return path.join(runtimeDirectory(), `${identityKey(this.config)}.preferences.json`); }
 
   connect(): void {
-    const botOptions = {
-      host: this.config.host,
-      port: this.config.port,
-      username: this.config.username,
-      version: this.config.version,
-      plugins: { pathfinder },
-    };
-
-    this.bot = mineflayer.createBot(botOptions);
+    if (this.stopped || this.bot) return;
     this.state = 'connecting';
     this.isReconnecting = false;
-
-    this.registerEventHandlers(this.bot);
+    try {
+      const bot = mineflayer.createBot({ ...this.config, plugins: { pathfinder } });
+      this.bot = bot;
+      this.registerEventHandlers(bot);
+      this.connectTimer = setTimeout(() => {
+        if (this.bot !== bot || this.state === 'connected') return;
+        this.lastDisconnect = 'Connection/spawn timed out after 15000ms';
+        this.bot = null;
+        this.state = 'disconnected';
+        bot.quit(this.lastDisconnect);
+        this.attemptReconnect();
+      }, 15000);
+      this.connectTimer.unref();
+    } catch (error) {
+      this.state = 'disconnected';
+      this.lastDisconnect = this.formatError(error);
+      this.callbacks.onLog('error', `Bot connection failed: ${this.lastDisconnect}`);
+      this.attemptReconnect();
+    }
   }
 
   private registerEventHandlers(bot: mineflayer.Bot): void {
-    bot.once('spawn', async () => {
+    bot.once('spawn', () => {
+      if (this.bot !== bot || this.stopped) return;
+      if (this.connectTimer) clearTimeout(this.connectTimer);
+      this.connectTimer = null;
+      const movements = new Movements(bot, minecraftData(bot.version));
+      movements.canDig = false;
+      movements.allow1by1towers = false;
+      movements.allowParkour = false;
+      movements.allowSprinting = false;
+      movements.maxDropDown = 2;
+      movements.liquidCost = 8;
+      bot.pathfinder.setMovements(movements);
+      bot.pathfinder.thinkTimeout = 1000;
+      bot.pathfinder.tickTimeout = 10;
+      bot.pathfinder.searchRadius = 64;
       this.state = 'connected';
-      this.callbacks.onLog('info', 'Bot spawned in world');
-
-      const mcData = minecraftData(bot.version);
-      const defaultMove = new Movements(bot, mcData);
-      defaultMove.canDig = false;
-      defaultMove.allow1by1towers = false;
-      defaultMove.maxDropDown = 2;
-      defaultMove.liquidCost = 8;
-      bot.pathfinder.setMovements(defaultMove);
-
-      bot.chat('LLM-powered bot ready to receive instructions!');
+      this.failures = 0;
+      this.connectedAt = new Date().toISOString();
+      for (const callback of this.spawnListeners) {
+        try { callback(bot); } catch (error) { this.callbacks.onLog('error', `Spawn setup failed: ${this.formatError(error)}`); }
+      }
       this.callbacks.onLog('info', `Bot connected successfully. Username: ${this.config.username}, Server: ${this.config.host}:${this.config.port}`);
     });
-
     bot.on('chat', (username, message) => {
-      if (username === bot.username) return;
-      this.callbacks.onChatMessage(username, message);
+      if (this.bot === bot && username !== bot.username) this.callbacks.onChatMessage(username, message);
     });
-
-    bot.on('kicked', (reason) => {
-      this.callbacks.onLog('error', `Bot was kicked from server: ${this.formatError(reason)}`);
-      this.state = 'disconnected';
+    bot.on('kicked', reason => {
+      if (this.bot !== bot) return;
+      this.lastDisconnect = this.formatError(reason);
+      if (/duplicate_login|logged in from another location/i.test(this.lastDisconnect)) {
+        this.blockedReason = 'Duplicate identity login detected; explicit controller handoff is required';
+      }
+      this.callbacks.onLog('error', `Bot was kicked from server: ${this.lastDisconnect}`);
       bot.quit();
     });
-
-    bot.on('error', (err) => {
-      const errorCode = (err as { code?: string }).code || 'Unknown error';
-      const errorMsg = err instanceof Error ? err.message : String(err);
-
-      this.callbacks.onLog('error', `Bot error [${errorCode}]: ${errorMsg}`);
-
-      if (errorCode === 'ECONNREFUSED' || errorCode === 'ETIMEDOUT') {
-        this.state = 'disconnected';
-      }
+    bot.on('error', error => {
+      if (this.bot !== bot) return;
+      this.lastDisconnect = this.formatError(error);
+      this.callbacks.onLog('error', `Bot error: ${this.lastDisconnect}`);
     });
-
-    bot.on('login', () => {
-      this.callbacks.onLog('info', 'Bot logged in successfully');
-    });
-
-    bot.on('end', (reason) => {
-      this.callbacks.onLog('info', `Bot disconnected: ${this.formatError(reason)}`);
-
-      if (this.state === 'connected') {
-        this.state = 'disconnected';
-      }
-
-      if (this.bot === bot) {
-        try {
-          bot.removeAllListeners();
-          this.bot = null;
-          this.callbacks.onLog('info', 'Bot instance cleaned up after disconnect');
-        } catch (err) {
-          this.callbacks.onLog('warn', `Error cleaning up bot on end event: ${this.formatError(err)}`);
-        }
-      }
+    bot.on('end', reason => {
+      if (this.bot !== bot) return;
+      if (this.connectTimer) clearTimeout(this.connectTimer);
+      this.connectTimer = null;
+      this.bot = null;
+      this.state = 'disconnected';
+      this.connectedAt = undefined;
+      this.lastDisconnect = this.formatError(reason);
+      this.callbacks.onLog('info', `Bot disconnected: ${this.lastDisconnect}`);
+      // Leave plugin end listeners intact so their timers and promises are cleaned up.
+      this.attemptReconnect();
     });
   }
 
   attemptReconnect(): void {
-    if (this.isReconnecting || this.state === 'connecting') {
-      return;
-    }
-
+    if (this.stopped || this.blockedReason || this.isReconnecting || this.bot || this.reconnectTimer) return;
     this.isReconnecting = true;
     this.state = 'connecting';
-    this.callbacks.onLog('info', `Attempting to reconnect to Minecraft server in ${this.reconnectDelayMs}ms...`);
-
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-    }
-
+    const wait = Math.min(30000, this.reconnectDelayMs * 2 ** Math.min(this.failures++, 4));
+    const jitter = Math.floor(wait * Math.random() * 0.1);
+    this.callbacks.onLog('info', `Attempting to reconnect in ${wait + jitter}ms`);
     this.reconnectTimer = setTimeout(() => {
-      if (this.bot) {
-        try {
-          this.bot.removeAllListeners();
-          this.bot.quit('Reconnecting...');
-          this.callbacks.onLog('info', 'Old bot instance cleaned up');
-        } catch (err) {
-          this.callbacks.onLog('warn', `Error while cleaning up old bot: ${this.formatError(err)}`);
-        }
-      }
-
-      this.callbacks.onLog('info', 'Creating new bot instance...');
+      this.reconnectTimer = null;
+      this.isReconnecting = false;
       this.connect();
-    }, this.reconnectDelayMs);
+    }, wait + jitter);
+    this.reconnectTimer.unref();
   }
 
   async checkConnectionAndReconnect(): Promise<{ connected: boolean; message?: string }> {
-    const currentState = this.state;
-
-    if (currentState === 'disconnected') {
-      this.attemptReconnect();
-
-      const maxWaitTime = this.reconnectDelayMs + 5000;
-      const pollInterval = 100;
-      const startTime = Date.now();
-
-      while (Date.now() - startTime < maxWaitTime) {
-        if (this.state === 'connected') {
-          return { connected: true };
-        }
-        await new Promise(resolve => setTimeout(resolve, pollInterval));
-      }
-
-      const errorMessage =
-        `Cannot connect to Minecraft server at ${this.config.host}:${this.config.port}\n\n` +
-        `Please ensure:\n` +
-        `1. Minecraft server is running on ${this.config.host}:${this.config.port}\n` +
-        `2. Server is accessible from this machine\n` +
-        `3. Server version is compatible (latest supported: ${SUPPORTED_MINECRAFT_VERSION})\n\n` +
-        `For setup instructions, visit: https://github.com/yuniko-software/minecraft-mcp-server`;
-
-      return { connected: false, message: errorMessage };
+    if (this.blockedReason) return { connected: false, message: this.blockedReason };
+    if (this.state === 'connected') return { connected: true };
+    if (this.state === 'connecting' && !this.bot && !this.reconnectTimer && !this.isReconnecting) this.state = 'disconnected';
+    if (this.state === 'connecting') return { connected: false, message: 'Bot is connecting to the Minecraft server. Please wait a moment and try again.' };
+    if (!this.stopped) this.attemptReconnect();
+    const deadline = Date.now() + this.reconnectDelayMs + 5000;
+    while (!this.stopped && Date.now() < deadline) {
+      if (this.isConnected()) return { connected: true };
+      await new Promise(resolve => setTimeout(resolve, 100));
     }
-
-    if (currentState === 'connecting') {
-      return { connected: false, message: 'Bot is connecting to the Minecraft server. Please wait a moment and try again.' };
-    }
-
-    return { connected: true };
+    return { connected: false, message: `Cannot connect to Minecraft server at ${this.config.host}:${this.config.port}. ` +
+      `Latest supported client: ${SUPPORTED_MINECRAFT_VERSION}. ${this.lastDisconnect ?? ''} ` +
+      'Setup: https://github.com/yuniko-software/minecraft-mcp-server' };
   }
 
   cleanup(): void {
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-    }
-    if (this.bot) {
-      try {
-        this.bot.quit('Server shutting down');
-      } catch (err) {
-        this.callbacks.onLog('warn', `Error during cleanup: ${this.formatError(err)}`);
-      }
-    }
+    this.stopped = true;
+    this.state = 'disconnected';
+    this.isReconnecting = false;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    if (this.connectTimer) clearTimeout(this.connectTimer);
+    this.reconnectTimer = this.connectTimer = null;
+    const bot = this.bot;
+    this.bot = null;
+    try { bot?.quit('Server shutting down'); }
+    catch (error) { this.callbacks.onLog('warn', `Error during cleanup: ${this.formatError(error)}`); }
   }
 
   private formatError(error: unknown): string {
-    if (error instanceof Error) {
-      return error.message;
-    }
-    try {
-      return JSON.stringify(error);
-    } catch {
-      return String(error);
-    }
+    if (error instanceof Error) return error.message;
+    try { return JSON.stringify(error); } catch { return String(error); }
   }
 }

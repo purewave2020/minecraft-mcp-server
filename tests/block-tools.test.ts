@@ -12,6 +12,7 @@ test('registerBlockTools registers place-block tool', (t) => {
     tool: sinon.stub()
   } as unknown as McpServer;
   const mockConnection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   const factory = new ToolFactory(mockServer, mockConnection);
@@ -32,6 +33,7 @@ test('registerBlockTools registers dig-block tool', (t) => {
     tool: sinon.stub()
   } as unknown as McpServer;
   const mockConnection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   const factory = new ToolFactory(mockServer, mockConnection);
@@ -52,6 +54,7 @@ test('registerBlockTools registers get-block-info tool', (t) => {
     tool: sinon.stub()
   } as unknown as McpServer;
   const mockConnection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   const factory = new ToolFactory(mockServer, mockConnection);
@@ -72,6 +75,7 @@ test('registerBlockTools registers find-blocks tool', (t) => {
     tool: sinon.stub()
   } as unknown as McpServer;
   const mockConnection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   const factory = new ToolFactory(mockServer, mockConnection);
@@ -92,6 +96,7 @@ test('get-block-info returns block information', async (t) => {
     tool: sinon.stub()
   } as unknown as McpServer;
   const mockConnection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   const factory = new ToolFactory(mockServer, mockConnection);
@@ -125,6 +130,7 @@ test('get-block-info handles missing block', async (t) => {
     tool: sinon.stub()
   } as unknown as McpServer;
   const mockConnection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   const factory = new ToolFactory(mockServer, mockConnection);
@@ -150,6 +156,7 @@ test('dig-block handles air blocks', async (t) => {
     tool: sinon.stub()
   } as unknown as McpServer;
   const mockConnection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   const factory = new ToolFactory(mockServer, mockConnection);
@@ -178,6 +185,7 @@ test('place-block blocks placing at bot position and one block above', async (t)
     tool: sinon.stub()
   } as unknown as McpServer;
   const mockConnection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   const factory = new ToolFactory(mockServer, mockConnection);
@@ -206,6 +214,7 @@ test('place-block floors input coordinates before self-placement guard', async (
     tool: sinon.stub()
   } as unknown as McpServer;
   const mockConnection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   const factory = new ToolFactory(mockServer, mockConnection);
@@ -232,6 +241,7 @@ test('find-blocks returns not found when block not found', async (t) => {
     tool: sinon.stub()
   } as unknown as McpServer;
   const mockConnection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   const factory = new ToolFactory(mockServer, mockConnection);
@@ -258,6 +268,7 @@ test('find-blocks returns multiple results when count is greater than one', asyn
     tool: sinon.stub()
   } as unknown as McpServer;
   const mockConnection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   const factory = new ToolFactory(mockServer, mockConnection);
@@ -287,6 +298,7 @@ test('find-blocks clamps oversized count before calling bot.findBlocks', async (
     tool: sinon.stub()
   } as unknown as McpServer;
   const mockConnection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   const factory = new ToolFactory(mockServer, mockConnection);
@@ -314,6 +326,7 @@ test('find-blocks clamps oversized count before calling bot.findBlocks', async (
 test('dig-block equips the best available harvest tool before mining', async (t) => {
   const mockServer = { tool: sinon.stub() } as unknown as McpServer;
   const connection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   const factory = new ToolFactory(mockServer, connection);
@@ -337,6 +350,7 @@ test('dig-block equips the best available harvest tool before mining', async (t)
 test('place-block replaces water using an adjacent solid reference', async (t) => {
   const mockServer = { tool: sinon.stub() } as unknown as McpServer;
   const connection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   const factory = new ToolFactory(mockServer, connection);
@@ -364,6 +378,7 @@ test.serial('dig-block cancels navigation when an obstructed block cannot be rea
   t.teardown(() => clock.restore());
   const mockServer = { tool: sinon.stub() } as unknown as McpServer;
   const connection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   const factory = new ToolFactory(mockServer, connection);
@@ -387,6 +402,7 @@ test.serial('dig-block cancels navigation when an obstructed block cannot be rea
 test('dig-block refuses an obstructed target after a falsely resolved path', async (t) => {
   const server = { tool: sinon.stub() } as unknown as McpServer;
   const connection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   const factory = new ToolFactory(server, connection);

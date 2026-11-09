@@ -9,7 +9,7 @@ import { Vec3 } from 'vec3';
 
 function sharingFixture() {
   const mockServer = { tool: sinon.stub() } as unknown as McpServer;
-  const connection = { checkConnectionAndReconnect: sinon.stub().resolves({ connected: true }) } as unknown as BotConnection;
+  const connection = { getBot: sinon.stub().returns({}), checkConnectionAndReconnect: sinon.stub().resolves({ connected: true }) } as unknown as BotConnection;
   let items = [{ name: 'cobblestone', count: 32, type: 4, metadata: 0 }];
   const bot = {
     entity: { id: 1, username: 'LLMBot', position: new Vec3(0, 64, 0) },
@@ -83,6 +83,7 @@ test('registerInventoryTools registers list-inventory tool', (t) => {
     tool: sinon.stub()
   } as unknown as McpServer;
   const mockConnection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   const factory = new ToolFactory(mockServer, mockConnection);
@@ -103,6 +104,7 @@ test('registerInventoryTools registers equip-item tool', (t) => {
     tool: sinon.stub()
   } as unknown as McpServer;
   const mockConnection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   const factory = new ToolFactory(mockServer, mockConnection);
@@ -123,6 +125,7 @@ test('list-inventory returns empty when no items', async (t) => {
     tool: sinon.stub()
   } as unknown as McpServer;
   const mockConnection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   const factory = new ToolFactory(mockServer, mockConnection);
@@ -150,6 +153,7 @@ test('list-inventory returns items with counts', async (t) => {
     tool: sinon.stub()
   } as unknown as McpServer;
   const mockConnection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   const factory = new ToolFactory(mockServer, mockConnection);
@@ -182,6 +186,7 @@ test('equip-item calls bot.equip', async (t) => {
     tool: sinon.stub()
   } as unknown as McpServer;
   const mockConnection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   const factory = new ToolFactory(mockServer, mockConnection);
@@ -215,6 +220,7 @@ test('equip-item returns message when item not found', async (t) => {
     tool: sinon.stub()
   } as unknown as McpServer;
   const mockConnection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   const factory = new ToolFactory(mockServer, mockConnection);

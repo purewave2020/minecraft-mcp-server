@@ -70,6 +70,7 @@ test('registerTool calls server.tool with correct parameters', async (t) => {
     tool: sinon.stub()
   } as unknown as McpServer;
   const mockConnection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   
@@ -90,6 +91,7 @@ test('registerTool executor checks connection before executing', async (t) => {
     tool: sinon.stub()
   } as unknown as McpServer;
   const mockConnection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   
@@ -109,6 +111,7 @@ test('registerTool executor returns error when not connected', async (t) => {
     tool: sinon.stub()
   } as unknown as McpServer;
   const mockConnection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ 
       connected: false, 
       message: 'Bot is not connected' 
@@ -135,6 +138,7 @@ test('registerTool executor calls executor when connected', async (t) => {
     tool: sinon.stub()
   } as unknown as McpServer;
   const mockConnection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   
@@ -155,6 +159,7 @@ test('registerTool executor returns executor result when successful', async (t) 
     tool: sinon.stub()
   } as unknown as McpServer;
   const mockConnection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   
@@ -175,6 +180,7 @@ test('registerTool executor catches and returns error response on exception', as
     tool: sinon.stub()
   } as unknown as McpServer;
   const mockConnection = {
+    getBot: sinon.stub().returns({}),
     checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
   } as unknown as BotConnection;
   

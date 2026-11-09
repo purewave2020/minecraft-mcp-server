@@ -1,3 +1,4 @@
+import { actionWait, checkAction, currentActionSignal } from '../action-coordinator.js';
 import { z } from "zod";
 import mineflayer from 'mineflayer';
 import type { Item } from 'prismarine-item';
@@ -21,10 +22,10 @@ export function registerFurnaceTools(factory: ToolFactory, getBot: () => minefla
       const block = bot.blockAt(new Vec3(x, y, z));
       if (!block || !FURNACE_BLOCKS.has(block.name)) throw new Error('No furnace at this position');
       if (bot.entity.position.distanceTo(block.position) > 4.5) throw new Error('Furnace is out of reach');
-      const furnace = await bot.openFurnace(block);
+      const furnace = await actionWait(Promise.resolve(bot.openFurnace(block)));
       const describe = (item: Item | null) => item ? { name: item.name, count: item.count } : null;
       try {
-        const taken = takeOutput && furnace.outputItem() ? await furnace.takeOutput() : null;
+        const taken = takeOutput && furnace.outputItem() ? await actionWait(Promise.resolve(furnace.takeOutput())) : null;
         return factory.createResponse(JSON.stringify({
           input: describe(furnace.inputItem()), fuel: describe(furnace.fuelItem()),
           output: describe(furnace.outputItem()), taken: describe(taken),
@@ -48,7 +49,7 @@ export function registerFurnaceTools(factory: ToolFactory, getBot: () => minefla
       fuelItem: z.string().trim().min(1).describe("Name of fuel item"),
       fuelCount: z.number().int().positive().optional().describe("Amount of fuel to use (default: 1)"),
       takeOutput: z.boolean().optional().describe("Whether to take output when ready (default: true)"),
-      timeoutMs: z.number().int().positive().optional().describe("Timeout waiting for output in ms (default: 60000)")
+      timeoutMs: z.number().int().positive().max(60000).optional().describe("Timeout waiting for output in ms (default: 60000)")
     },
     async ({
       x,
@@ -74,29 +75,30 @@ export function registerFurnaceTools(factory: ToolFactory, getBot: () => minefla
       ({ x, y, z } = coerceCoordinates(x, y, z));
 
       const bot = getBot();
+      checkAction();
 
       const furnacePos = new Vec3(x, y, z);
       const furnaceBlock = bot.blockAt(furnacePos);
 
       if (!furnaceBlock || !FURNACE_BLOCKS.has(furnaceBlock.name)) {
-        return factory.createResponse(`No furnace block found at (${x}, ${y}, ${z})`);
+        return factory.createErrorResponse(`No furnace block found at (${x}, ${y}, ${z})`);
       }
 
       const items = bot.inventory.items();
-      const input = items.find((item) => item.name.includes(inputItem.toLowerCase()));
+      const input = items.find(item => item.name === inputItem.toLowerCase());
       if (!input) {
-        return factory.createResponse(`Couldn't find any item matching '${inputItem}' in inventory`);
+        return factory.createErrorResponse(`Couldn't find any item matching '${inputItem}' in inventory`);
       }
 
-      const fuel = items.find((item) => item.name.includes(fuelItem.toLowerCase()));
+      const fuel = items.find(item => item.name === fuelItem.toLowerCase());
       if (!fuel) {
-        return factory.createResponse(`Couldn't find any fuel item matching '${fuelItem}' in inventory`);
+        return factory.createErrorResponse(`Couldn't find any fuel item matching '${fuelItem}' in inventory`);
       }
 
       const resolvedInputCount = Math.min(inputCount, input.count);
       const resolvedFuelCount = Math.min(fuelCount, fuel.count);
 
-      const furnace = await bot.openFurnace(furnaceBlock);
+      const furnace = await actionWait(Promise.resolve(bot.openFurnace(furnaceBlock)));
       const cleanup = () => {
         try {
           furnace.close();
@@ -108,16 +110,16 @@ export function registerFurnaceTools(factory: ToolFactory, getBot: () => minefla
       try {
         const existingInput = furnace.inputItem();
         if (existingInput && existingInput.name !== input.name) {
-          return factory.createResponse(`Furnace input slot is occupied by ${existingInput.name}`);
+          return factory.createErrorResponse(`Furnace input slot is occupied by ${existingInput.name}`);
         }
 
         const existingFuel = furnace.fuelItem();
         if (existingFuel && existingFuel.name !== fuel.name) {
-          return factory.createResponse(`Furnace fuel slot is occupied by ${existingFuel.name}`);
+          return factory.createErrorResponse(`Furnace fuel slot is occupied by ${existingFuel.name}`);
         }
 
-        await furnace.putFuel(fuel.type, fuel.metadata ?? null, resolvedFuelCount);
-        await furnace.putInput(input.type, input.metadata ?? null, resolvedInputCount);
+        await actionWait(Promise.resolve(furnace.putFuel(fuel.type, fuel.metadata ?? null, resolvedFuelCount)));
+        await actionWait(Promise.resolve(furnace.putInput(input.type, input.metadata ?? null, resolvedInputCount)));
 
         if (!takeOutput) {
           return factory.createResponse(
@@ -125,12 +127,12 @@ export function registerFurnaceTools(factory: ToolFactory, getBot: () => minefla
           );
         }
 
-        const output = await waitForOutput(furnace, timeoutMs);
+        const output = await actionWait(waitForOutput(furnace, timeoutMs));
         if (!output) {
-          return factory.createResponse(`No output after ${timeoutMs}ms`);
+          return factory.createErrorResponse(`No output after ${timeoutMs}ms`);
         }
 
-        const taken = await furnace.takeOutput();
+        const taken = await actionWait(Promise.resolve(furnace.takeOutput()));
         return factory.createResponse(`Smelted ${taken.count} ${taken.name}`);
       } finally {
         cleanup();
@@ -145,8 +147,10 @@ async function waitForOutput(furnace: mineflayer.Furnace, timeoutMs: number): Pr
     return existing;
   }
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const signal = currentActionSignal();
+    const onAbort = () => { cleanup(); reject(signal?.reason ?? new Error('Smelting cancelled')); };
 
     const onUpdate = () => {
       const output = furnace.outputItem();
@@ -158,12 +162,15 @@ async function waitForOutput(furnace: mineflayer.Furnace, timeoutMs: number): Pr
 
     const cleanup = () => {
       furnace.removeListener('update', onUpdate);
+      signal?.removeEventListener('abort', onAbort);
       if (timeoutId) {
         clearTimeout(timeoutId);
       }
     };
 
     furnace.on('update', onUpdate);
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) { onAbort(); return; }
 
     timeoutId = setTimeout(() => {
       cleanup();

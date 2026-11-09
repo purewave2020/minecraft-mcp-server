@@ -21,7 +21,8 @@
     "start": "node dist/main.js",
     "test": "ava",
     "lint": "eslint \"{src,tests}/**/*.ts\"",
-    "lint:fix": "eslint \"{src,tests}/**/*.ts\" --fix"
+    "lint:fix": "eslint \"{src,tests}/**/*.ts\" --fix",
+    "test:runtime": "node --test tests/runtime.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",

@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 import test from 'ava';
 import { MessageStore } from '../src/message-store.js';
 
@@ -117,4 +120,20 @@ test('getRecentMessages with zero count', (t) => {
   const messages = store.getRecentMessages(0);
   
   t.is(messages.length, 0);
+});
+
+test('priority messages survive a chat flood and a process restart until acknowledged', t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'minecraft-chat-'));
+  t.teardown(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const filename = path.join(directory, 'chat.json');
+  const first = new MessageStore(filename);
+  first.addMessage('qingyage', '先回营地');
+  const priority = first.read(100, 'qingyage')[0];
+  for (let i = 0; i < 150; i++) first.addMessage('other', 'chat '+i);
+  const restarted = new MessageStore(filename);
+  t.is(restarted.read(100, 'qingyage', 0, true)[0].id, priority.id);
+  t.is(restarted.read(100, 'qingyage', priority.sequence).length, 0);
+  t.is(restarted.acknowledge([priority.id]), 1);
+  t.is(new MessageStore(filename).read(100, 'qingyage', 0, true).length, 0);
+  t.is(fs.statSync(filename).mode & 0o777, 0o600);
 });

@@ -18,20 +18,17 @@ import { registerGameStateTools } from './tools/gamestate-tools.js';
 import { registerCraftingTools } from './tools/crafting-tools.js';
 import { registerFurnaceTools } from './tools/furnace-tools.js';
 import { registerSurvivalTools } from './tools/survival-tools.js';
+import path from 'node:path';
+import { acquireIdentityLock, identityKey, runtimeDirectory } from './runtime-state.js';
+import { attachMovementGuard, movementStatus } from './movement-guard.js';
 
 setupStdioFiltering();
 
-process.on('unhandledRejection', (reason) => {
-  log('error', `Unhandled rejection: ${reason}`);
-});
-
-process.on('uncaughtException', (error) => {
-  log('error', `Uncaught exception: ${error}`);
-});
-
 async function main() {
   const config = parseConfig();
-  const messageStore = new MessageStore();
+  const releaseIdentity = acquireIdentityLock(config);
+  process.once('exit', releaseIdentity);
+  const messageStore = new MessageStore(path.join(runtimeDirectory(), `${identityKey(config)}.chat.json`));
 
   const connection = new BotConnection(
     config,
@@ -41,14 +38,13 @@ async function main() {
     }
   );
 
-  connection.connect();
-
   const server = new McpServer({
     name: "minecraft-mcp-server",
     version: "2.0.4"
   });
 
   const factory = new ToolFactory(server, connection);
+  connection.onSpawn(bot => attachMovementGuard(bot, factory.actions));
   const getBot = () => connection.getBot()!;
 
   registerPositionTools(factory, getBot);
@@ -61,11 +57,28 @@ async function main() {
   registerCraftingTools(factory, getBot);
   registerFurnaceTools(factory, getBot);
   registerSurvivalTools(factory, getBot);
+  factory.registerTool('get-connection-status', 'Inspect live connection health without reconnecting or moving the bot', {},
+    async () => factory.createResponse(JSON.stringify({ ...connection.getStatus(), currentAction: factory.actions.currentAction,
+      movement: movementStatus(connection.getBot()) })));
+
+  connection.connect();
+  let stopping = false;
+  const shutdown = (exitCode = 0) => {
+    if (stopping) return;
+    stopping = true;
+    factory.actions.cancel('MCP server shutting down');
+    connection.cleanup();
+    releaseIdentity();
+    log('info', 'MCP server shutting down');
+    setTimeout(() => process.exit(exitCode), 200).unref();
+  };
+  process.once('SIGTERM', () => shutdown());
+  process.once('SIGINT', () => shutdown());
+  process.on('uncaughtException', error => { log('error', `Uncaught exception: ${error.stack ?? error}`); shutdown(1); });
+  process.on('unhandledRejection', reason => { log('error', `Unhandled rejection: ${reason}`); shutdown(1); });
 
   process.stdin.on('end', () => {
-    connection.cleanup();
-    log('info', 'MCP Client has disconnected. Shutting down...');
-    process.exit(0);
+    shutdown();
   });
 
   const transport = new StdioServerTransport();

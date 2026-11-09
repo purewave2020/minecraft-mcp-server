@@ -28,7 +28,7 @@ A Minecraft bot powered by large language models and [Mineflayer API](https://gi
 ## Prerequisites
 
 - Git
-- Node.js (>= 20.10.0)
+- Node.js (>= 22)
 - A running game using the latest version of Minecraft Java Edition (included in Microsoft Game Pass)
 - An MCP-compatible client. Claude Desktop will be used as an example, but other MCP clients are also supported
 
@@ -67,6 +67,8 @@ Make sure that [Claude Desktop](https://claude.ai/download) is installed. Open `
 Double-check that right `--port` and `--host` parameters were used. Make sure to completely reboot the Claude Desktop application (should be closed in OS tray). 
 
 ## Running
+
+For the maintained LAN deployment, shared ViaProxy lifecycle, backups and recovery, see [operations](ops/README.md).
 
 Make sure Minecraft game is running and the world is opened to LAN. Then start Claude Desktop application and the bot should join the game. 
 

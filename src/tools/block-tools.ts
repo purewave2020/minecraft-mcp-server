@@ -1,3 +1,4 @@
+import { actionWait, checkAction } from '../action-coordinator.js';
 import { z } from "zod";
 import mineflayer from 'mineflayer';
 import pathfinderPkg from 'mineflayer-pathfinder';
@@ -21,7 +22,7 @@ async function approachBlock(bot: mineflayer.Bot, goal: InstanceType<typeof goal
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
     await Promise.race([
-      bot.pathfinder.goto(goal),
+      actionWait(bot.pathfinder.goto(goal)),
       new Promise<never>((_, reject) => {
         timeout = setTimeout(() => {
           reject(new Error('Navigation to block timed out after 15000ms'));
@@ -53,7 +54,7 @@ export function registerBlockTools(factory: ToolFactory, getBot: () => mineflaye
 
       const botPos = bot.entity.position.floored();
       if (placePos.equals(botPos) || placePos.equals(botPos.offset(0, 1, 0))) {
-        return factory.createResponse(`You can't place a block where you're standing or one block above`);
+        return factory.createErrorResponse(`You can't place a block where you're standing or one block above`);
       }
 
       const blockAtPos = bot.blockAt(placePos);
@@ -79,6 +80,7 @@ export function registerBlockTools(factory: ToolFactory, getBot: () => mineflaye
       }
 
       for (const face of possibleFaces) {
+        checkAction();
         const referencePos = placePos.plus(face.vector);
         const referenceBlock = bot.blockAt(referencePos);
 
@@ -88,19 +90,20 @@ export function registerBlockTools(factory: ToolFactory, getBot: () => mineflaye
             await approachBlock(bot, goal);
           }
 
-          await bot.lookAt(placePos, true);
+          await actionWait(Promise.resolve(bot.lookAt(placePos, true)));
 
           try {
-            await bot.placeBlock(referenceBlock, face.vector.scaled(-1));
+            await actionWait(Promise.resolve(bot.placeBlock(referenceBlock, face.vector.scaled(-1))));
             return factory.createResponse(`Placed block at (${x}, ${y}, ${z}) using ${face.direction} face`);
           } catch (placeError) {
+            checkAction();
             log('warn', `Failed to place using ${face.direction} face: ${placeError}`);
             continue;
           }
         }
       }
 
-      return factory.createResponse(`Failed to place block at (${x}, ${y}, ${z}): No suitable reference block found`);
+      return factory.createErrorResponse(`Failed to place block at (${x}, ${y}, ${z}): No suitable reference block found`);
     }
   );
 
@@ -132,8 +135,8 @@ export function registerBlockTools(factory: ToolFactory, getBot: () => mineflaye
       }
 
       const tool = bot.pathfinder.bestHarvestTool?.(block);
-      if (tool) await bot.equip(tool, 'hand');
-      await bot.dig(block);
+      if (tool) await actionWait(Promise.resolve(bot.equip(tool, 'hand')));
+      await actionWait(Promise.resolve(bot.dig(block)));
       return factory.createResponse(`Dug ${block.name} at (${x}, ${y}, ${z})`);
     }
   );
@@ -166,7 +169,7 @@ export function registerBlockTools(factory: ToolFactory, getBot: () => mineflaye
     "Find one or more nearby blocks of a specific type",
     {
       blockType: z.string().describe("Type of block to find"),
-      maxDistance: z.coerce.number().finite().optional().describe("Maximum search distance (default: 16)"),
+      maxDistance: z.coerce.number().finite().min(1).max(128).optional().describe("Maximum search distance (default: 16)"),
       count: z.coerce.number().int().positive().optional().describe("Maximum number of blocks to return (default: 1; values above 256 are clamped)")
     },
     async ({ blockType, maxDistance = 16, count = 1 }) => {
@@ -176,7 +179,7 @@ export function registerBlockTools(factory: ToolFactory, getBot: () => mineflaye
       const normalizedCount = Math.min(count, MAX_FIND_BLOCKS_COUNT);
 
       if (!blocksByName[blockType]) {
-        return factory.createResponse(`Unknown block type: ${blockType}`);
+        return factory.createErrorResponse(`Unknown block type: ${blockType}`);
       }
 
       const blockId = blocksByName[blockType].id;

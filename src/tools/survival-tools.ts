@@ -1,4 +1,5 @@
-import { setTimeout as delay } from 'node:timers/promises';
+import { actionWait, checkAction } from '../action-coordinator.js';
+import { actionDelay as delay, actionCoordinatorFor, stopBotActions } from '../action-coordinator.js';
 import type mineflayer from 'mineflayer';
 import minecraftData from 'minecraft-data';
 import pathfinderPkg from 'mineflayer-pathfinder';
@@ -36,7 +37,7 @@ function sheepWool(bot: mineflayer.Bot, entity: mineflayer.Bot['entity']): { col
 }
 
 async function aimAtEntity(bot: mineflayer.Bot, entity: mineflayer.Bot['entity']): Promise<boolean> {
-  await bot.lookAt(entity.position.offset(0, (entity.height || 1) / 2, 0), true);
+  await actionWait(Promise.resolve(bot.lookAt(entity.position.offset(0, (entity.height || 1) / 2, 0), true)));
   return bot.entityAtCursor(3.2)?.id === entity.id;
 }
 
@@ -90,8 +91,8 @@ export function registerSurvivalTools(factory: ToolFactory, getBot: () => minefl
     const bot = getBot();
     const syncBot = bot as typeof bot & { _syncWindow?: (window: typeof bot.inventory) => Promise<void> };
     if (!syncBot._syncWindow) throw new Error('This Mineflayer version does not support inventory synchronization');
-    if (bot.currentWindow) await bot.closeWindow(bot.currentWindow);
-    await syncBot._syncWindow(bot.inventory);
+    if (bot.currentWindow) await actionWait(Promise.resolve(bot.closeWindow(bot.currentWindow)));
+    await actionWait(Promise.resolve(syncBot._syncWindow(bot.inventory)));
     if (collectCrafting) {
       if (bot.inventory.selectedItem) {
         let empty = -1;
@@ -99,12 +100,12 @@ export function registerSurvivalTools(factory: ToolFactory, getBot: () => minefl
           if (!bot.inventory.slots[slot]) { empty = slot; break; }
         }
         if (empty < 0) throw new Error('Inventory is full; cannot recover cursor item');
-        await bot.clickWindow(empty, 0, 0);
+        await actionWait(Promise.resolve(bot.clickWindow(empty, 0, 0)));
       }
       for (let slot = 0; slot <= 4; slot++) {
-        if (bot.inventory.slots[slot]) await bot.putAway(slot);
+        if (bot.inventory.slots[slot]) await actionWait(Promise.resolve(bot.putAway(slot)));
       }
-      await syncBot._syncWindow(bot.inventory);
+      await actionWait(Promise.resolve(syncBot._syncWindow(bot.inventory)));
     }
     return factory.createResponse(JSON.stringify({
       inventory: bot.inventory.items().map(item => ({ name: item.name, count: item.count })),
@@ -119,6 +120,7 @@ export function registerSurvivalTools(factory: ToolFactory, getBot: () => minefl
     const bot = getBot();
     let count = 0;
     for (let i = 0; i < hits; i++) {
+      checkAction();
       const target = bot.entities[entityId];
       if (!target || target.isValid === false) break;
       if (isPlayer(target)) throw new Error('Player combat is disabled');
@@ -149,8 +151,8 @@ export function registerSurvivalTools(factory: ToolFactory, getBot: () => minefl
     if (!(await aimAtEntity(bot, target))) throw new Error('Entity is obstructed; move to a clear position first');
     // Vanilla sends interact_at before interact. ViaBackwards maps the first
     // packet to 26.1+ interaction and drops the second as a duplicate.
-    await bot.activateEntityAt(target, target.position.offset(0, (target.height || 1) / 2, 0));
-    await bot.activateEntity(target);
+    await actionWait(Promise.resolve(bot.activateEntityAt(target, target.position.offset(0, (target.height || 1) / 2, 0))));
+    await actionWait(Promise.resolve(bot.activateEntity(target)));
     await delay(200);
     return factory.createResponse(`Interacted with ${target.name ?? 'entity'} ${entityId}`);
   });
@@ -164,20 +166,20 @@ export function registerSurvivalTools(factory: ToolFactory, getBot: () => minefl
     if (!minecraftData(bot.version).foodsByName[item.name]) throw new Error(`${itemName} is not food`);
     if (bot.food >= 20) return factory.createResponse('Hunger is already full');
     const previous = bot.heldItem;
-    await bot.equip(item, 'hand');
+    await actionWait(Promise.resolve(bot.equip(item, 'hand')));
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
-      await Promise.race([
+      await actionWait(Promise.race([
         bot.consume(),
         new Promise<never>((_, reject) => {
           timeout = setTimeout(() => reject(new Error('Eating timed out')), 10000);
         })
-      ]);
+      ]));
     } finally {
       clearTimeout(timeout);
       bot.deactivateItem();
       const restore = previous && bot.inventory.items().find(item => item.type === previous.type);
-      if (restore) await bot.equip(restore, 'hand');
+      if (restore) { checkAction(); await actionWait(Promise.resolve(bot.equip(restore, 'hand'))); }
     }
     return factory.createResponse(`Ate ${itemName}. Health: ${bot.health}, hunger: ${bot.food}`);
   });
@@ -193,20 +195,20 @@ export function registerSurvivalTools(factory: ToolFactory, getBot: () => minefl
     if (bot.entity.position.distanceTo(block.position) > 4.5) throw new Error('Block is out of reach; move closer first');
     if (action === 'sleep' || action === 'wake') {
       if (!block.name.endsWith('_bed')) throw new Error('Sleeping requires a bed');
-      if (action === 'wake') await bot.wake();
-      else await bot.sleep(block);
+      if (action === 'wake') await actionWait(Promise.resolve(bot.wake()));
+      else await actionWait(Promise.resolve(bot.sleep(block)));
     } else {
       const shape = block.shapes[0] ?? [0, 0, 0, 1, 1, 1];
-      await bot.lookAt(block.position.offset(
+      await actionWait(bot.lookAt(block.position.offset(
         (shape[0] + shape[3]) / 2, (shape[1] + shape[4]) / 2, (shape[2] + shape[5]) / 2
-      ), true);
+      ), true));
       const hit = bot.blockAtCursor(4.5) as (typeof block & { face: number; intersect: Vec3 }) | null;
       const sameDoor = block.name.endsWith('_door') && hit?.name === block.name &&
         hit.position.x === block.position.x && hit.position.z === block.position.z;
       if (!hit || (!hit.position.equals(block.position) && !sameDoor)) throw new Error('Block is obstructed');
       const faces = [new Vec3(0, -1, 0), new Vec3(0, 1, 0), new Vec3(0, 0, -1),
         new Vec3(0, 0, 1), new Vec3(-1, 0, 0), new Vec3(1, 0, 0)];
-      await bot.activateBlock(hit, faces[hit.face], hit.intersect.minus(hit.position));
+      await actionWait(Promise.resolve(bot.activateBlock(hit, faces[hit.face], hit.intersect.minus(hit.position))));
       await delay(100);
     }
     return factory.createResponse(`${action === 'sleep' ? 'Sleeping in' : action === 'wake' ? 'Woke from' : 'Activated'} ${block.name}`);
@@ -235,10 +237,7 @@ export function registerSurvivalTools(factory: ToolFactory, getBot: () => minefl
     return factory.createResponse('Stopped navigation, digging and item use');
   });
 
-  factory.registerTool('set-defense', 'Enable or disable automatic melee defense and retreat from dangerous hostile creatures', {
-    enabled: z.boolean()
-  }, async ({ enabled }) => {
-    const bot = getBot();
+  const configureDefense = (bot: mineflayer.Bot, enabled: boolean) => {
     const existing = defenses.get(bot);
     if (existing) existing.cleanup();
     defenses.delete(bot);
@@ -250,8 +249,19 @@ export function registerSurvivalTools(factory: ToolFactory, getBot: () => minefl
       let escapeTimeout: ReturnType<typeof setTimeout> | undefined;
       const timer = setInterval(() => {
         if (busy || bot.health <= 0 || bot._client.state !== 'play') return;
+        const coordinator = actionCoordinatorFor(bot);
+        if (coordinator?.currentAction) {
+          const emergency = (bot.oxygenLevel !== undefined && bot.oxygenLevel >= 0 && bot.oxygenLevel < 12) ||
+            Object.values(bot.entities).some(entity => !isPlayer(entity) && hostileNames.has(entity.name ?? '') &&
+              entity.position.distanceTo(bot.entity.position) < (entity.name === 'creeper' ? 5 : 3) && hasLineOfSight(bot, entity));
+          if (emergency && coordinator.currentAction !== 'automatic-defense') {
+            coordinator.cancel('Emergency defense interrupted the current action');
+            stopBotActions(bot);
+          }
+          return;
+        }
         busy = true;
-        void (async () => {
+        const perform = async () => {
           const oxygen = bot.oxygenLevel;
           const lowAir = oxygen !== undefined && oxygen >= 0 && oxygen < 12;
           if (lowAir || state.surfacing) {
@@ -291,7 +301,7 @@ export function registerSurvivalTools(factory: ToolFactory, getBot: () => minefl
             escapeTimeout = setTimeout(() => {
               if (bot.pathfinder.goal === goal) bot.pathfinder.setGoal(null);
             }, 7000);
-            void bot.pathfinder.goto(goal).catch(() => {}).finally(() => {
+            await actionWait(bot.pathfinder.goto(goal)).catch(error => { checkAction(); state.lastError = String(error); }).finally(() => {
               clearTimeout(escapeTimeout);
               if (escapeGoal === goal) {
                 escapeGoal = null;
@@ -304,12 +314,13 @@ export function registerSurvivalTools(factory: ToolFactory, getBot: () => minefl
           const weaponNames = ['netherite_sword', 'diamond_sword', 'iron_sword', 'stone_sword', 'golden_sword', 'wooden_sword'];
           const items = bot.inventory.items();
           const weapon = weaponNames.map(name => items.find(item => item.name === name)).find(Boolean);
-          if (weapon && bot.heldItem?.type !== weapon.type) await bot.equip(weapon, 'hand');
+          if (weapon && bot.heldItem?.type !== weapon.type) await actionWait(Promise.resolve(bot.equip(weapon, 'hand')));
           if (defenses.get(bot)?.timer !== timer || bot._client.state !== 'play' || bot.entities[target.id] !== target) return;
           bot.attack(target);
           state.attacks++;
           lastAttack = Date.now();
-        })().catch(error => {
+        };
+        void (coordinator ? coordinator.run('automatic-defense', () => bot, perform, undefined, 9000) : perform()).catch(error => {
           state.lastError = error instanceof Error ? error.message : String(error);
         }).finally(() => { busy = false; });
       }, 150);
@@ -326,6 +337,13 @@ export function registerSurvivalTools(factory: ToolFactory, getBot: () => minefl
       defenses.set(bot, state);
       bot.once('end', cleanup);
     }
+  };
+  factory.onBotSpawn?.(bot => configureDefense(bot, factory.getConnection().getPreference('defense', true)));
+  factory.registerTool('set-defense', 'Enable or disable automatic melee defense and retreat from dangerous hostile creatures', {
+    enabled: z.boolean()
+  }, async ({ enabled }) => {
+    factory.getConnection?.().setPreference?.('defense', enabled);
+    configureDefense(getBot(), enabled);
     return factory.createResponse(`Automatic hostile-creature defense ${enabled ? 'enabled' : 'disabled'}`);
   });
 }

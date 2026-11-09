@@ -1,3 +1,4 @@
+import { actionWait, checkAction } from '../action-coordinator.js';
 import { z } from "zod";
 import mineflayer from 'mineflayer';
 import minecraftData from 'minecraft-data';
@@ -401,7 +402,7 @@ export function registerCraftingTools(factory: ToolFactory, getBot: () => minefl
     "Craft an item using a crafting recipe",
     {
       outputItem: z.string().trim().min(1).describe("Name of the item to craft"),
-      amount: z.number().int().min(1).optional().describe("Number of times to craft (default: 1)")
+      amount: z.number().int().min(1).max(64).optional().describe("Number of times to craft (default: 1)")
     },
     async ({ outputItem, amount = 1 }) => {
       const outputQuery = normalizeItemName(outputItem);
@@ -425,6 +426,7 @@ export function registerCraftingTools(factory: ToolFactory, getBot: () => minefl
       const candidates = candidatesFromBot.length > 0 ? candidatesFromBot : collectCandidateRecipes(recipes, outputQuery, itemsById);
 
       for (let attempt = 0; attempt < amount; attempt++) {
+        checkAction();
         const currentInventory = bot.inventory.items().map(item => ({ name: item.name, count: item.count }));
         let craftedThisAttempt = false;
         let bestCannotCraft: { missingTotal: number; message: string } | null = null;
@@ -447,12 +449,12 @@ export function registerCraftingTools(factory: ToolFactory, getBot: () => minefl
             const beforeCount = currentInventory.filter(item => item.name === candidate.resultName)
               .reduce((sum, item) => sum + item.count, 0);
             if (candidate.craftingTable) {
-              await bot.craft(candidate.recipe as Parameters<typeof bot.craft>[0], 1, candidate.craftingTable as Parameters<typeof bot.craft>[2]);
+              await actionWait(Promise.resolve(bot.craft(candidate.recipe as Parameters<typeof bot.craft>[0], 1, candidate.craftingTable as Parameters<typeof bot.craft>[2])));
             } else {
-              await bot.craft(candidate.recipe as Parameters<typeof bot.craft>[0], 1);
+              await actionWait(Promise.resolve(bot.craft(candidate.recipe as Parameters<typeof bot.craft>[0], 1)));
             }
             const syncBot = bot as typeof bot & { _syncWindow?: (window: typeof bot.inventory) => Promise<void> };
-            if (syncBot._syncWindow && !bot.currentWindow) await syncBot._syncWindow(bot.inventory);
+            if (syncBot._syncWindow && !bot.currentWindow) await actionWait(Promise.resolve(syncBot._syncWindow(bot.inventory)));
             const afterCount = bot.inventory.items().filter(item => item.name === candidate.resultName)
               .reduce((sum, item) => sum + item.count, 0);
             if (afterCount < beforeCount + candidate.resultCount) {
@@ -463,6 +465,7 @@ export function registerCraftingTools(factory: ToolFactory, getBot: () => minefl
             log('info', `Crafted ${candidate.resultName}`);
             break;
           } catch (err) {
+            checkAction();
             lastError = err instanceof Error ? err.message : String(err);
             log('warn', `Failed to craft ${outputItem}: ${lastError}`);
           }

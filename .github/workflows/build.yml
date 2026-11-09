@@ -33,3 +33,6 @@ jobs:
 
     - name: Test
       run: npm test
+
+    - name: Runtime tests
+      run: npm run test:runtime

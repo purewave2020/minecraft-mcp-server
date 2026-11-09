@@ -1,3 +1,4 @@
+import { actionWait, checkAction } from '../action-coordinator.js';
 import { z } from "zod";
 import mineflayer from 'mineflayer';
 import { ToolFactory } from '../tool-factory.js';
@@ -19,6 +20,7 @@ export function registerInventoryTools(factory: ToolFactory, getBot: () => minef
     },
     async ({ itemName, count, recipient }) => {
       const bot = getBot();
+      checkAction();
       const target = Object.values(bot.entities).find(entity => entity.username === recipient && entity.isValid !== false);
       if (!target || target === bot.entity) throw new Error('Recipient is not an available nearby player');
       if (bot.entity.position.distanceTo(target.position) > 4) throw new Error('Recipient is out of sharing reach');
@@ -32,12 +34,12 @@ export function registerInventoryTools(factory: ToolFactory, getBot: () => minef
       const matchingMetadataCount = matching.filter(candidate => candidate.type === item.type && candidate.metadata === item.metadata)
         .reduce((sum, candidate) => sum + candidate.count, 0);
       if (matchingMetadataCount < count) throw new Error('Requested items have different metadata; share a smaller amount');
-      await bot.lookAt(target.position.offset(0, 1, 0), true);
+      await actionWait(Promise.resolve(bot.lookAt(target.position.offset(0, 1, 0), true)));
       // The server needs the new yaw before handling the inventory drop packet.
-      await bot.waitForTicks(2);
-      await bot.toss(item.type, item.metadata ?? null, count);
+      await actionWait(Promise.resolve(bot.waitForTicks(2)));
+      await actionWait(Promise.resolve(bot.toss(item.type, item.metadata ?? null, count)));
       const syncBot = bot as typeof bot & { _syncWindow?: (window: typeof bot.inventory) => Promise<void> };
-      if (syncBot._syncWindow) await syncBot._syncWindow(bot.inventory);
+      if (syncBot._syncWindow) await actionWait(Promise.resolve(syncBot._syncWindow(bot.inventory)));
       const afterCount = bot.inventory.items().filter(item => item.name === itemName)
         .reduce((sum, item) => sum + item.count, 0);
       if (afterCount > beforeCount - count) throw new Error('Item drop was not confirmed; inspect inventory and nearby drops before retrying');
@@ -87,7 +89,7 @@ export function registerInventoryTools(factory: ToolFactory, getBot: () => minef
       if (item) {
         return factory.createResponse(`Found ${item.count} ${item.name} in inventory (slot ${item.slot})`);
       } else {
-        return factory.createResponse(`Couldn't find any item matching '${nameOrType}' in inventory`);
+        return factory.createErrorResponse(`Couldn't find any item matching '${nameOrType}' in inventory`);
       }
     }
   );
@@ -97,7 +99,7 @@ export function registerInventoryTools(factory: ToolFactory, getBot: () => minef
     "Equip a specific item",
     {
       itemName: z.string().describe("Name of the item to equip"),
-      destination: z.string().optional().describe("Where to equip the item (default: 'hand')")
+      destination: z.enum(['hand', 'off-hand', 'head', 'torso', 'legs', 'feet']).optional().describe("Where to equip the item (default: 'hand')")
     },
     async ({ itemName, destination = 'hand' }) => {
       const bot = getBot();
@@ -107,10 +109,10 @@ export function registerInventoryTools(factory: ToolFactory, getBot: () => minef
       );
 
       if (!item) {
-        return factory.createResponse(`Couldn't find any item matching '${itemName}' in inventory`);
+        return factory.createErrorResponse(`Couldn't find any item matching '${itemName}' in inventory`);
       }
 
-      await bot.equip(item, destination as mineflayer.EquipmentDestination);
+      await actionWait(Promise.resolve(bot.equip(item, destination as mineflayer.EquipmentDestination)));
       return factory.createResponse(`Equipped ${item.name} to ${destination}`);
     }
   );

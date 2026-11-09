@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 import test from 'ava';
 import sinon from 'sinon';
 import { BotConnection } from '../src/bot-connection.js';
@@ -120,7 +121,8 @@ test('checkConnectionAndReconnect returns message when connecting', async (t) =>
   const callbacks = { onLog: sinon.stub(), onChatMessage: sinon.stub() };
   const connection = new BotConnection(config, callbacks);
 
-  (connection as unknown as { state: string }).state = 'connecting';
+  (connection as unknown as { state: string; isReconnecting: boolean }).state = 'connecting';
+  (connection as unknown as { isReconnecting: boolean }).isReconnecting = true;
 
   const result = await connection.checkConnectionAndReconnect();
 
@@ -171,4 +173,37 @@ test('cleanup does not throw when no bot exists', (t) => {
   t.notThrows(() => {
     connection.cleanup();
   });
+});
+
+test('ending before spawn schedules recovery and preserves plugin cleanup listeners', t => {
+  const connection = new BotConnection({ host: 'localhost', port: 0, username: 'AuditFake' }, { onLog: () => {}, onChatMessage: () => {} }, 10000);
+  const bot = new EventEmitter();
+  const internals = connection as unknown as { bot: unknown; state: string; registerEventHandlers: (bot: unknown) => void };
+  internals.bot = bot; internals.state = 'connecting'; internals.registerEventHandlers(bot);
+  const cleanup = sinon.stub(); bot.on('end', cleanup); bot.emit('end', 'socketClosed');
+  t.is(connection.getBot(), null);
+  t.true(connection.getStatus().reconnectPending);
+  t.true(cleanup.calledOnce);
+  connection.cleanup();
+});
+
+test('a duplicate login suspends recovery until an explicit handoff', t => {
+  const connection = new BotConnection({ host: 'localhost', port: 0, username: 'AuditFake' }, { onLog: () => {}, onChatMessage: () => {} });
+  const bot = Object.assign(new EventEmitter(), { quit: sinon.stub() });
+  const internals = connection as unknown as { bot: unknown; state: string; registerEventHandlers: (bot: unknown) => void };
+  internals.bot = bot; internals.state = 'connecting'; internals.registerEventHandlers(bot);
+  bot.emit('kicked', { translate: 'multiplayer.disconnect.duplicate_login' }); bot.emit('end', 'socketClosed');
+  t.regex(String(connection.getStatus().blockedReason), /handoff/);
+  t.false(connection.getStatus().reconnectPending);
+  connection.cleanup();
+});
+
+test('a late end event from an old bot cannot disconnect its replacement', t => {
+  const connection = new BotConnection({ host: 'localhost', port: 0, username: 'AuditFake' }, { onLog: () => {}, onChatMessage: () => {} });
+  const old = new EventEmitter(); const replacement = new EventEmitter();
+  const internals = connection as unknown as { bot: unknown; state: string; registerEventHandlers: (bot: unknown) => void };
+  internals.bot = old; internals.registerEventHandlers(old); internals.bot = replacement; internals.state = 'connected';
+  old.emit('end', 'late disconnect');
+  t.is(connection.getBot(), replacement as never); t.is(connection.getState(), 'connected');
+  internals.bot = null; connection.cleanup();
 });

@@ -1,3 +1,4 @@
+import { actionWait, checkAction } from '../action-coordinator.js';
 import { z } from "zod";
 import mineflayer from 'mineflayer';
 import { Vec3 } from 'vec3';
@@ -47,7 +48,7 @@ export function registerFlightTools(factory: ToolFactory, getBot: () => mineflay
       const bot = getBot();
 
       if (!bot.creative) {
-        return factory.createResponse("Creative mode is not available. Cannot fly.");
+        return factory.createErrorResponse("Creative mode is not available. Cannot fly.");
       }
 
       const controller = new AbortController();
@@ -61,7 +62,8 @@ export function registerFlightTools(factory: ToolFactory, getBot: () => mineflay
 
       try {
         const destination = new Vec3(x, y, z);
-        await createCancellableFlightOperation(bot, destination, controller);
+        checkAction();
+        await actionWait(createCancellableFlightOperation(bot, destination, controller));
         return factory.createResponse(`Successfully flew to position (${x}, ${y}, ${z}).`);
       } catch (error) {
         if (controller.signal.aborted) {

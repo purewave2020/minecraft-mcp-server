@@ -5,6 +5,8 @@ declare module 'mineflayer-pathfinder' {
     constructor(_bot: Bot, _mcData: unknown);
     canDig: boolean;
     allow1by1towers: boolean;
+    allowParkour: boolean;
+    allowSprinting: boolean;
     maxDropDown: number;
     liquidCost: number;
   }

@@ -1,3 +1,4 @@
+import { actionWait, checkAction, actionDelay } from '../action-coordinator.js';
 import { z } from "zod";
 import mineflayer from 'mineflayer';
 import pathfinderPkg from 'mineflayer-pathfinder';
@@ -32,10 +33,10 @@ export function registerPositionTools(factory: ToolFactory, getBot: () => minefl
       x: z.coerce.number().describe("X coordinate"),
       y: z.coerce.number().describe("Y coordinate"),
       z: z.coerce.number().describe("Z coordinate"),
-      range: z.coerce.number().finite().optional().describe("How close to get to the target (default: 1)"),
-      timeoutMs: z.number().int().min(50).optional().describe("Timeout in milliseconds before cancelling (min: 50, default: no timeout)")
+      range: z.coerce.number().finite().min(0).max(16).optional().describe("How close to get to the target (default: 1)"),
+      timeoutMs: z.number().int().min(50).max(60000).optional().describe("Timeout in milliseconds before cancelling (default: 30000; max: 60000)")
     },
-    async ({ x, y, z, range = 1, timeoutMs }: { x: number; y: number; z: number; range?: number; timeoutMs?: number }) => {
+    async ({ x, y, z, range = 1, timeoutMs = 30000 }: { x: number; y: number; z: number; range?: number; timeoutMs?: number }) => {
       ({ x, y, z } = coerceCoordinates(x, y, z));
 
       const bot = getBot();
@@ -53,11 +54,11 @@ export function registerPositionTools(factory: ToolFactory, getBot: () => minefl
         });
       }
 
-      const gotoPromise = bot.pathfinder.goto(goal);
+      const gotoPromise = actionWait(bot.pathfinder.goto(goal));
 
       try {
         if (timeoutPromise) {
-          await Promise.race([gotoPromise, timeoutPromise]);
+          await actionWait(Promise.race([gotoPromise, timeoutPromise]));
         } else {
           await gotoPromise;
         }
@@ -101,7 +102,7 @@ export function registerPositionTools(factory: ToolFactory, getBot: () => minefl
       ({ x, y, z } = coerceCoordinates(x, y, z));
 
       const bot = getBot();
-      await bot.lookAt(new Vec3(x, y, z), true);
+      await actionWait(Promise.resolve(bot.lookAt(new Vec3(x, y, z), true)));
       return factory.createResponse(`Looking at position (${x}, ${y}, ${z})`);
     }
   );
@@ -113,7 +114,8 @@ export function registerPositionTools(factory: ToolFactory, getBot: () => minefl
     async () => {
       const bot = getBot();
       bot.setControlState('jump', true);
-      setTimeout(() => bot.setControlState('jump', false), 250);
+      try { await actionDelay(250); }
+      finally { bot.setControlState('jump', false); }
       return factory.createResponse("Successfully jumped");
     }
   );
@@ -123,17 +125,15 @@ export function registerPositionTools(factory: ToolFactory, getBot: () => minefl
     "Move the bot in a specific direction for a duration",
     {
       direction: z.enum(['forward', 'back', 'left', 'right']).describe("Direction to move"),
-      duration: z.number().optional().describe("Duration in milliseconds (default: 1000)")
+      duration: z.number().int().min(50).max(10000).optional().describe("Duration in milliseconds (default: 1000)")
     },
     async ({ direction, duration = 1000 }: { direction: Direction, duration?: number }) => {
       const bot = getBot();
-      return new Promise((resolve) => {
-        bot.setControlState(direction, true);
-        setTimeout(() => {
-          bot.setControlState(direction, false);
-          resolve(factory.createResponse(`Moved ${direction} for ${duration}ms`));
-        }, duration);
-      });
+      checkAction();
+      bot.setControlState(direction, true);
+      try { await actionDelay(duration); }
+      finally { bot.setControlState(direction, false); }
+      return factory.createResponse(`Moved ${direction} for ${duration}ms`);
     }
   );
 }
