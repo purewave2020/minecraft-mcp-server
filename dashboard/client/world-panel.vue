@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue';
 import { state } from './state.js';
+import { speechState, toggleSpeech } from './chat-speech.js';
 import { avatar, playerColor } from './bluemap.js';
 import { changeCamera, changeMap, focusPlayer, refreshMap, selectPlayer, showTrail, stopFollowing } from './main.js';
 import type { Player } from '../server/types.js';
@@ -25,6 +26,8 @@ const activities = computed(() => [...state.activity].reverse().slice(0, 30));
 const dimensions = [{ id: 'overworld', name: '主世界', symbol: '◈' }, { id: 'the_nether', name: '下界', symbol: '◇' }, { id: 'the_end', name: '末地', symbol: '✧' }];
 const dimensionNames: Record<string, string> = { 'minecraft:overworld': '主世界', 'minecraft:the_nether': '下界', 'minecraft:the_end': '末地' };
 const clock = computed(() => new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(state.now));
+const speechLabel = computed(() => speechState.changing ? '切换中' : speechState.loading ? '加载声音4' : !speechState.supported ? '声音4不可用' : speechState.error ? '重试播报' : speechState.ready ? (speechState.speaking ? '正在播报' : '后台播报已开') : '开启播报');
+const speechTitle = computed(() => speechState.error ?? (speechState.ready ? '关闭本机后台语音播报（声音4）' : '开启本机后台语音播报（声音4），关闭浏览器后仍会继续'));
 const itemNames: Record<string, string> = {
   stone_pickaxe: '石镐', wooden_pickaxe: '木镐', iron_pickaxe: '铁镐', diamond_pickaxe: '钻石镐', iron_sword: '铁剑', stone_sword: '石剑',
   oak_log: '橡木原木', birch_log: '白桦原木', oak_planks: '橡木木板', birch_planks: '白桦木板', cobblestone: '圆石', coal: '煤炭',
@@ -84,7 +87,13 @@ onUnmounted(() => { if (detailTimer) clearInterval(detailTimer); });
       <nav class="md-dimensions" aria-label="世界维度">
         <button v-for="dimension in dimensions" :key="dimension.id" :class="{ active: state.currentMap === dimension.id }" :disabled="!available(dimension.id) || !state.engineReady" :title="available(dimension.id) ? dimension.name : '该维度尚未生成存档'" @click="changeMap(dimension.id)"><span>{{ dimension.symbol }}</span>{{ dimension.name }}</button>
       </nav>
-      <div class="md-top-status"><span class="md-connection" :class="{ online: live }"><i></i>{{ live ? '实时连接' : '正在连接' }}</span><time>{{ clock }}</time></div>
+      <div class="md-top-status">
+        <button class="md-speech-toggle" :class="{ active: speechState.ready }" :disabled="speechState.loading || speechState.changing || !speechState.supported" :aria-pressed="speechState.ready" :aria-label="speechState.ready ? '关闭聊天语音播报' : '开启聊天语音播报'" :title="speechTitle" @click="toggleSpeech">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4 6 8H3v8h3l5 4Z" /><path v-if="speechState.ready" d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14" /><path v-else d="m16 9 5 6m0-6-5 6" /></svg>
+          <span>{{ speechLabel }}</span>
+        </button>
+        <span class="md-connection" :class="{ online: live }"><i></i>{{ live ? '实时连接' : '正在连接' }}</span><time>{{ clock }}</time>
+      </div>
     </header>
 
     <div v-if="state.error || state.collector.error" class="md-alert" role="status">{{ state.error || state.collector.error }} · 显示最近一次数据</div>

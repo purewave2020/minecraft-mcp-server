@@ -28,3 +28,6 @@ body.minecraft-dashboard-active>#app{display:none!important}
 @media(prefers-reduced-motion:reduce){.md-vitals em{transition:none}}
 @media(min-width:760px) and (max-width:1599px){.md-feed.with-detail{bottom:110px}}
 @media(min-width:760px) and (max-width:1100px){.md-detail.with-chat{max-height:calc(100vh - 456px)}}
+.md-speech-toggle{display:flex;align-items:center;justify-content:center;gap:6px;padding:6px 9px;border-radius:6px;background:#c0e2d20c;color:#a6b9ad!important;font-size:11px!important;flex-shrink:0}.md-speech-toggle:hover{background:#a3e4cb1c}.md-speech-toggle.active{background:#a3e4cb1a;color:#a3e4cb!important}.md-speech-toggle svg{width:18px;height:18px;stroke:currentColor;stroke-width:1.6;fill:none;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+@media(max-width:759px){.md-speech-toggle{width:30px;height:30px;padding:6px}.md-speech-toggle span{display:none}.md-top-status{gap:8px}}
+@media(max-width:359px){.md-brand{min-width:110px;gap:5px}.md-brand strong{font-size:14px;letter-spacing:1px}.md-dimensions button{padding:6px}.md-topbar{padding:0 10px;gap:6px}}

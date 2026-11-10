@@ -27,6 +27,18 @@ export interface ChatMessage {
   expiresAt: number;
   historical: boolean;
 }
+export interface BackgroundSpeechStatus {
+  supported: boolean;
+  loading: boolean;
+  enabled: boolean;
+  ready: boolean;
+  speaking: boolean;
+  pending: number;
+  error: string | null;
+  voiceName: string;
+  voiceId: string;
+  revision: number;
+}
 export interface WorldMap {
   id: string;
   name: string;

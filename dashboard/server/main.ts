@@ -8,6 +8,8 @@ import { WorldState } from './world-state.js';
 import { Collector } from './collector.js';
 import { MapWorker } from './map-worker.js';
 import { streamEvents } from './stream-events.js';
+import { Voice4Speech } from './voice4-speech.js';
+import { BackgroundSpeech } from './background-speech.js';
 
 process.umask(0o077);
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -17,6 +19,7 @@ fs.mkdirSync(path.join(directory, 'web'), { recursive: true });
 const botNames = new Set(['LLMBot', 'GPTBot', 'GrokBot', 'DevinBot', 'ClaudeBot', 'SWEBot']);
 const store = new Store(path.join(directory, 'dashboard.sqlite'));
 const world = new WorldState(store, botNames);
+const speech = new BackgroundSpeech(store, new Voice4Speech(path.join(directory, 'speech'), process.env.DASHBOARD_OFFLINE === '1' ? 'offline' : process.platform));
 const collector = new Collector(store, world);
 const mapWorker = new MapWorker(directory, store, Number(process.env.DASHBOARD_SYNC_MS ?? 300_000));
 const app = Fastify({ logger: false, requestTimeout: 15_000 });
@@ -25,7 +28,7 @@ const snapshot = (): Record<string, unknown> => ({
   players: Array.from(world.players.values()).map(player => ({ ...player, inventory: [] })),
   chat: store.chats(),
   activity: store.db.prepare("SELECT data FROM events WHERE type='world.event' ORDER BY id DESC LIMIT 30").all().reverse().map(row => JSON.parse(String(row.data))),
-  collector: collector.status, metrics: collector.metrics, map: mapWorker.state, cursor: store.lastEventId(), now: Date.now()
+  collector: collector.status, metrics: collector.metrics, map: mapWorker.state, speech: { ...speech.status }, cursor: store.lastEventId(), now: Date.now()
 });
 
 const host = process.env.DASHBOARD_HOST ?? '127.0.0.1';
@@ -39,6 +42,32 @@ app.addHook('onRequest', async (request, reply) => {
 app.get('/', (_request, reply) => reply.redirect('/map/'));
 app.get('/health', () => ({ ok: true, collector: collector.status, mapAvailable: mapWorker.state.available }));
 app.get('/api/snapshot', () => snapshot());
+app.get('/api/speech/status', () => speech.status);
+app.post<{ Body: { enabled?: unknown } }>('/api/speech', async (request, reply) => {
+  const enabled = request.body?.enabled;
+  if (typeof enabled !== 'boolean') return reply.code(400).send({ error: 'enabled 必须是布尔值' });
+  try {
+    return await speech.setEnabled(enabled);
+  } catch {
+    return reply.code(503).send({ error: '声音4后台播报暂不可用，请确认已安装该系统声音后重试' });
+  }
+});
+app.post<{ Body: { id?: unknown; text?: unknown; source?: unknown } }>('/api/speech/messages', async (request, reply) => {
+  const { id, text, source = 'douyin' } = request.body ?? {};
+  if (typeof id !== 'string' || !/^[\w:.-]{1,200}$/.test(id)
+      || typeof text !== 'string' || !text.trim() || text.length > 1000 || source !== 'douyin') {
+    return reply.code(400).send({ error: '需要有效的 id、text（1–1000 字）和 source: douyin' });
+  }
+  try {
+    const status = await speech.enqueueAnnouncement(id, text, source);
+    if (status === 'disabled') return reply.code(409).send({ error: 'dashboard 后台播报已关闭' });
+    if (status === 'full') return reply.code(429).header('Retry-After', '2').send({ error: '播报队列已满，请稍后使用相同 id 重试' });
+    if (status === 'empty') return reply.code(400).send({ error: '播报文本为空' });
+    return reply.code(status === 'queued' ? 202 : 200).send({ id, status, pending: speech.status.pending });
+  } catch {
+    return reply.code(503).send({ error: 'dashboard 后台语音暂不可用' });
+  }
+});
 app.get<{ Params: { id: string } }>('/api/players/:id', (request, reply) => {
   const player = Array.from(world.players.values()).find(value => value.id === request.params.id);
   if (!player) return reply.code(404).send({ error: '玩家不存在' });
@@ -79,13 +108,14 @@ const prune = setInterval(() => store.prune(), 600_000); prune.unref(); store.pr
 const port = Number(process.env.DASHBOARD_PORT ?? 18100);
 const address = await app.listen({ host, port });
 console.log(`Minecraft dashboard: ${address}/`);
+void speech.start();
 if (process.env.DASHBOARD_OFFLINE !== '1') collector.start();
 if (process.env.DASHBOARD_SKIP_RENDER !== '1') void mapWorker.cycle(!fs.existsSync(path.join(directory, 'world-manifest.json')));
 
 let stopping = false;
 async function stop(): Promise<void> {
   if (stopping) return; stopping = true;
-  clearInterval(prune); collector.stop(); await mapWorker.stop();
+  clearInterval(prune); collector.stop(); await Promise.all([mapWorker.stop(), speech.stop()]);
   app.server.closeAllConnections(); await app.close(); store.close();
 }
 process.once('SIGTERM', () => { void stop().then(() => process.exit(0)); });

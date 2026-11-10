@@ -1,5 +1,6 @@
 import { reactive } from 'vue';
-import type { ChatMessage, MapState, Player } from '../server/types.js';
+import type { BackgroundSpeechStatus, ChatMessage, MapState, Player } from '../server/types.js';
+import { applySpeechStatus } from './chat-speech.js';
 export interface Activity { id: string; kind: string; text: string; timestamp: number }
 export const state = reactive({
   players: [] as Player[], chat: [] as ChatMessage[], activity: [] as Activity[],
@@ -22,6 +23,7 @@ function applySnapshot(data: Record<string, unknown>): void {
   state.metrics = data.metrics as typeof state.metrics;
   state.map = data.map as MapState;
   for (const message of state.chat) seen.add(message.id);
+  if (data.speech) applySpeechStatus(data.speech as BackgroundSpeechStatus);
 }
 export async function connect(onMapUpdate: () => void): Promise<void> {
   try {
@@ -45,6 +47,7 @@ export async function connect(onMapUpdate: () => void): Promise<void> {
     });
     listen('world.event', (event: Activity) => { state.activity.push(event); if (state.activity.length > 60) state.activity.shift(); });
     listen('collector.status', (value: typeof state.collector) => { state.collector = value; });
+    listen('speech.status', applySpeechStatus);
     listen('server.metrics', (value: typeof state.metrics) => { state.metrics = value; });
     listen('map.status', (value: MapState) => {
       const wasAvailable = state.map.available; state.map = value;

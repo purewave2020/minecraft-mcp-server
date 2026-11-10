@@ -16,6 +16,7 @@
     "test": "tsx --test tests/*.test.ts && python3 -m unittest discover -s bridge -p 'test_*.py'",
     "lint": "eslint .",
     "test:browser": "node tests/browser-smoke.mjs",
+    "test:speech-browser": "node tests/speech-browser.mjs",
     "setup-map": "python3 bridge/remote.py setup",
     "sync-map": "python3 bridge/remote.py snapshot",
     "service": "node service.mjs"
