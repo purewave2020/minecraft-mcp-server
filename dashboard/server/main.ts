@@ -28,7 +28,8 @@ const snapshot = (): Record<string, unknown> => ({
   players: Array.from(world.players.values()).map(player => ({ ...player, inventory: [] })),
   chat: store.chats(),
   activity: store.db.prepare("SELECT data FROM events WHERE type='world.event' ORDER BY id DESC LIMIT 30").all().reverse().map(row => JSON.parse(String(row.data))),
-  collector: collector.status, metrics: collector.metrics, map: mapWorker.state, speech: { ...speech.status }, cursor: store.lastEventId(), now: Date.now()
+  collector: collector.status, metrics: collector.metrics, map: mapWorker.state, environment: { ...world.environment.state },
+  speech: { ...speech.status }, cursor: store.lastEventId(), now: Date.now()
 });
 
 const host = process.env.DASHBOARD_HOST ?? '127.0.0.1';

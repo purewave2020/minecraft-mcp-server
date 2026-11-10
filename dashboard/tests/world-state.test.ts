@@ -38,6 +38,29 @@ test('dimension change clears stale coordinates until a position in the new dime
   } finally { store.close(); }
 });
 
+test('full and compact rotation polls preserve position, vitals and inventory without adding trail points', () => {
+  const store = new Store(':memory:'); const world = new WorldState(store, new Set());
+  const line = (data: string) => world.line(`[10:00:00] [Server thread/INFO]: System chat: Human has the following entity data: ${data}`, 'rotation', false);
+  try {
+    line('{Pos:[1d,72d,3d],Rotation:[179f,30f],Health:20f,foodLevel:18,Inventory:[{Slot:0b,id:"minecraft:torch",count:4}]}');
+    const player = world.get('Human'); const positionAt = player.positionAt;
+    assert.deepEqual(player.rotation, { yaw: 179, pitch: 30 });
+    line('[-179.5f,-45f]');
+    assert.deepEqual(player.rotation, { yaw: -179.5, pitch: -45 });
+    assert.deepEqual(player.position, { x: 1, y: 72, z: 3 }); assert.equal(player.positionAt, positionAt);
+    assert.equal(player.health, 20); assert.equal(player.food, 18); assert.equal(player.inventory[0].count, 4);
+    assert.equal(store.points(player.id, 0).length, 1);
+    assert.deepEqual((store.events(0).at(-1)!.data as typeof player).rotation, player.rotation);
+    line('[2d,73d,4d]');
+    assert.deepEqual(player.rotation, { yaw: -179.5, pitch: -45 });
+    line('["invalid",0f]'); line('[0f]');
+    assert.deepEqual(player.rotation, { yaw: -179.5, pitch: -45 });
+    assert.deepEqual(new WorldState(store, new Set()).get('Human').rotation, player.rotation);
+    world.line('[10:00:01] [Server thread/INFO]: Human joined the game', 'join', false);
+    assert.equal(player.rotation, null);
+  } finally { store.close(); }
+});
+
 test('log byte cursors deduplicate replays but preserve identical consecutive public messages and UTF-8 splits', () => {
   const store = new Store(':memory:'); const world = new WorldState(store, new Set(['LLMBot']));
   const decoder = new LogDecoder(world, store);

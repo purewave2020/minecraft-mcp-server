@@ -39,6 +39,10 @@ try {
   await page.waitForFunction(() => !!window.bluemap.mapControls.data.followingPlayer);
   assert.equal(await page.locator('.md-detail h2').textContent(), player.name);
   assert.equal(await page.locator('body > #app').isVisible(), false);
+  assert.equal(await page.evaluate(() => window.bluemap.mapViewer.controlsManager.distance), 0);
+  // Inspect the player's overhead bubbles from the overview, outside their first-person view.
+  await page.locator('.md-detail-actions .primary', { hasText: '停止跟随' }).click({ force: true });
+  await page.getByRole('button', { name: '⌖ 定位' }).click({ force: true });
   const prefix = '浏览器气泡回归测试';
   const fixture = `browser-${Date.now()}`;
   const inject = async (suffix, content, ttl = 60_000) => page.evaluate(({ id, player, content, ttl }) => {
@@ -72,6 +76,7 @@ try {
   });
   await inject('expiry', prefix + ' 八秒过期', 8000);
   await label.locator('.md-chat-bubble').filter({ hasText: prefix + ' 八秒过期' }).waitFor({ state: 'visible' });
+  await page.locator('.md-detail-actions .primary', { hasText: '跟随玩家' }).click({ force: true });
   await page.evaluate(() => window.minecraftDashboard.refresh());
   await page.waitForTimeout(11_000);
   assert.ok(await page.locator('.dashboard-marker').count() >= online.length);

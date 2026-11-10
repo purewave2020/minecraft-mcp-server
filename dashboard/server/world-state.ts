@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { parseSnbt, type Nbt } from './snbt.js';
-import type { ChatMessage, Item, Player, Position } from './types.js';
+import type { ChatMessage, Item, Player, Position, Rotation } from './types.js';
 import { Store } from './store.js';
+import { EnvironmentTracker } from './environment.js';
 
 export function offlineId(name: string): string {
   const bytes = createHash('md5').update(`OfflinePlayer:${name}`).digest();
@@ -23,6 +24,10 @@ function position(value: Nbt | undefined): Position | null {
   if (!Array.isArray(value) || value.length !== 3 || value.some(n => typeof n !== 'number' || !Number.isFinite(n))) return null;
   return { x: Number(value[0]), y: Number(value[1]), z: Number(value[2]) };
 }
+function rotation(value: Nbt | undefined): Rotation | null {
+  if (!Array.isArray(value) || value.length !== 2 || value.some(n => typeof n !== 'number' || !Number.isFinite(n))) return null;
+  return { yaw: Number(value[0]), pitch: Math.max(-90, Math.min(90, Number(value[1]))) };
+}
 function logTime(text: string, receivedAt: number): number {
   const [hour, minute, second] = text.split(':').map(Number);
   // The game server and UI use Asia/Shanghai; log lines omit their calendar date.
@@ -35,14 +40,16 @@ function logTime(text: string, receivedAt: number): number {
 
 export class WorldState {
   readonly players = new Map<string, Player>();
+  readonly environment: EnvironmentTracker;
   constructor(readonly store: Store, readonly botNames: Set<string>) {
-    for (const player of store.players()) this.players.set(player.name, player);
+    this.environment = new EnvironmentTracker(store);
+    for (const player of store.players()) this.players.set(player.name, { ...player, rotation: player.rotation ?? null });
   }
   get(name: string): Player {
     let player = this.players.get(name);
     if (!player) {
       player = { id: offlineId(name), name, bot: this.botNames.has(name), online: true, dimension: 'minecraft:overworld',
-        position: null, health: null, food: null, xp: null, inventory: [], equipment: {}, effects: [],
+        position: null, rotation: null, health: null, food: null, xp: null, inventory: [], equipment: {}, effects: [],
         observedAt: null, positionAt: null, joinedAt: Date.now() };
       this.players.set(name, player);
     }
@@ -73,11 +80,15 @@ export class WorldState {
     if (Array.isArray(nbt)) {
       const pos = position(nbt);
       if (pos) { player.position = pos; player.positionAt = at; this.changed(player, true); }
+      const rot = rotation(nbt);
+      if (rot) { player.rotation = rot; this.changed(player); }
       return;
     }
     const data = object(nbt);
     const pos = position(data.Pos ?? data.pos);
     if (pos) { player.position = pos; player.positionAt = at; }
+    const rot = rotation(data.Rotation ?? data.rotation);
+    if (rot) player.rotation = rot;
     const dimension = data.Dimension ?? data.dimension;
     if (typeof dimension === 'string') player.dimension = dimension;
     player.health = number(data.Health ?? data.health);
@@ -112,6 +123,7 @@ export class WorldState {
       return;
     }
     const clean = body.replace(/^System chat: /, '');
+    if (this.environment.line(clean, timestamp, historical)) return;
     const data = /^([A-Za-z0-9_]{1,16}) has the following entity data: (.+)$/.exec(clean);
     if (data) {
       if (!historical) {
@@ -135,7 +147,7 @@ export class WorldState {
     if (presence) {
       if (!historical) {
         const player = this.get(presence[1]); player.online = presence[2] === 'joined';
-        if (player.online) { player.joinedAt = timestamp; player.position = null; player.positionAt = null; }
+        if (player.online) { player.joinedAt = timestamp; player.position = null; player.positionAt = null; player.rotation = null; }
         this.changed(player);
       }
       this.store.event('world.event', { id: sourceId, kind: presence[2], text: clean, timestamp, historical });

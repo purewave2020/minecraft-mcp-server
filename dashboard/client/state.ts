@@ -1,5 +1,5 @@
 import { reactive } from 'vue';
-import type { BackgroundSpeechStatus, ChatMessage, MapState, Player } from '../server/types.js';
+import type { BackgroundSpeechStatus, ChatMessage, EnvironmentState, MapState, Player } from '../server/types.js';
 import { applySpeechStatus } from './chat-speech.js';
 export interface Activity { id: string; kind: string; text: string; timestamp: number }
 export const state = reactive({
@@ -7,6 +7,7 @@ export const state = reactive({
   collector: { connected: false, observedAt: 0, error: null as string | null, parseErrors: 0 },
   metrics: null as Record<string, unknown> | null,
   map: { available: false, syncing: false, snapshotAt: null, syncedAt: null, renderedAt: null, progress: '正在连接世界', error: null, maps: [] } as MapState,
+  environment: { timeOfDay: null, timeRate: 0, timeObservedAt: null, weather: null, weatherObservedAt: null } as EnvironmentState,
   streamConnected: false, engineReady: false, currentMap: 'overworld',
   selectedId: localStorage.getItem('minecraft-dashboard-selected'), follow: false,
   bubbles: localStorage.getItem('minecraft-dashboard-bubbles') !== 'false',
@@ -14,6 +15,7 @@ export const state = reactive({
 });
 let source: EventSource | null = null;
 let connected = false;
+let serverOffset = 0;
 const seen = new Set<string>();
 function applySnapshot(data: Record<string, unknown>): void {
   state.players = data.players as Player[];
@@ -22,6 +24,8 @@ function applySnapshot(data: Record<string, unknown>): void {
   state.collector = data.collector as typeof state.collector;
   state.metrics = data.metrics as typeof state.metrics;
   state.map = data.map as MapState;
+  if (typeof data.now === 'number') { serverOffset = data.now - Date.now(); state.now = data.now; }
+  if (data.environment) state.environment = data.environment as EnvironmentState;
   for (const message of state.chat) seen.add(message.id);
   if (data.speech) applySpeechStatus(data.speech as BackgroundSpeechStatus);
 }
@@ -48,6 +52,11 @@ export async function connect(onMapUpdate: () => void): Promise<void> {
     listen('world.event', (event: Activity) => { state.activity.push(event); if (state.activity.length > 60) state.activity.shift(); });
     listen('collector.status', (value: typeof state.collector) => { state.collector = value; });
     listen('speech.status', applySpeechStatus);
+    listen('world.environment', (value: EnvironmentState) => {
+      // Replayed SSE updates must not replace a newer snapshot's time or weather.
+      if ((value.timeObservedAt ?? 0) >= (state.environment.timeObservedAt ?? 0)
+          && (value.weatherObservedAt ?? 0) >= (state.environment.weatherObservedAt ?? 0)) state.environment = value;
+    });
     listen('server.metrics', (value: typeof state.metrics) => { state.metrics = value; });
     listen('map.status', (value: MapState) => {
       const wasAvailable = state.map.available; state.map = value;
@@ -66,7 +75,7 @@ export async function connect(onMapUpdate: () => void): Promise<void> {
   }
 }
 setInterval(() => {
-  state.now = Date.now();
+  state.now = Date.now() + serverOffset;
   if (connected && state.collector.connected && state.now - state.collector.observedAt > 20_000) state.collector.connected = false;
 }, 1000);
 window.addEventListener('beforeunload', () => source?.close());

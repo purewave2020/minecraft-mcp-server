@@ -2,6 +2,7 @@ import { createApp, watch } from 'vue';
 import Panel from './world-panel.vue';
 import { connect, state } from './state.js';
 import { SandTableLayer } from './bluemap.js';
+import { EnvironmentLayer } from './environment-layer.js';
 import type { Player } from '../server/types.js';
 import './style.css';
 
@@ -9,6 +10,7 @@ const mount = document.createElement('div'); mount.id = 'minecraft-dashboard-roo
 document.body.classList.add('minecraft-dashboard-active');
 document.title = '世界沙盘';
 let layer: SandTableLayer | null = null;
+let environmentLayer: EnvironmentLayer | null = null;
 let refreshing = false;
 export function selectPlayer(id: string): void {
   if (state.selectedId !== id) stopFollowing();
@@ -36,6 +38,8 @@ const engineCheck = setInterval(() => {
   if (!window.bluemap?.popupMarkerSet || !window.BlueMap?.HtmlMarker || !window.bluemap.mapViewer.map) return;
   clearInterval(engineCheck);
   layer = new SandTableLayer(window.bluemap, selectPlayer, id => { state.currentMap = id; }, following => { state.follow = following; });
+  environmentLayer = new EnvironmentLayer(window.bluemap);
+  watch(() => [state.environment, state.now], () => environmentLayer!.sync(state.environment, state.now), { deep: true, immediate: true });
   document.title = '世界沙盘';
   state.engineReady = true;
   if (!localStorage.getItem('minecraft-dashboard-view-initialized')) {
@@ -48,3 +52,4 @@ const engineCheck = setInterval(() => {
   };
   watch(() => [state.players, state.chat, state.selectedId, state.now, state.bubbles], sync, { deep: true, immediate: true });
 }, 100);
+window.addEventListener('beforeunload', () => environmentLayer?.dispose());

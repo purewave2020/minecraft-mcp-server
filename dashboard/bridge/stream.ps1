@@ -6,6 +6,7 @@ $log=Join-Path $root 'logs\latest.log'
 $stream=$null; $fileId=''; $offset=0L; $initial=$true
 $lastPosition=[DateTime]::MinValue; $lastStatus=[DateTime]::MinValue
 $lastFull=[DateTime]::MinValue; $lastMetrics=[DateTime]::MinValue
+$lastEnvironment=[DateTime]::MinValue
 . (Join-Path $root 'console-channel.ps1')
 $paths=Initialize-MinecraftConsoleChannel -Root $root
 function Emit($value) { [Console]::WriteLine(($value | ConvertTo-Json -Depth 12 -Compress)); [Console]::Out.Flush() }
@@ -69,6 +70,7 @@ try {
     $commands=@()
     if(($now-$lastPosition).TotalMilliseconds -ge $DashboardRequest.positionIntervalMs) {
       $commands+='execute as @a run data get entity @s Pos'
+      $commands+='execute as @a run data get entity @s Rotation'
       $commands+='execute as @a run data get entity @s Dimension'
       $lastPosition=$now
     }
@@ -81,6 +83,14 @@ try {
     if(($now-$lastFull).TotalSeconds -ge 30) {
       $commands+='execute as @a run data get entity @s'
       $lastFull=$now
+    }
+    if(($now-$lastEnvironment).TotalSeconds -ge 5) {
+      $commands+='time of minecraft:overworld query minecraft:day'
+      # Empty command-storage reads label successful predicates without changing world data or sending chat.
+      $commands+='execute in minecraft:overworld if predicate {type:"minecraft:weather_check",raining:false} run data get storage minecraft_dashboard:weather_clear'
+      $commands+='execute in minecraft:overworld if predicate {type:"minecraft:weather_check",raining:true,thundering:false} run data get storage minecraft_dashboard:weather_rain'
+      $commands+='execute in minecraft:overworld if predicate {type:"minecraft:weather_check",raining:true,thundering:true} run data get storage minecraft_dashboard:weather_thunder'
+      $lastEnvironment=$now
     }
     if($commands.Count){QueryBatch $commands}
     if(($now-$lastMetrics).TotalSeconds -ge 5) {

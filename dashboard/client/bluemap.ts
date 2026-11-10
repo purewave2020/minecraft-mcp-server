@@ -1,6 +1,22 @@
-import type { ChatMessage, Player, Position } from '../server/types.js';
+import type { ChatMessage, Player, Position, Rotation } from '../server/types.js';
 
 interface Vector extends Position { set(x: number, y: number, z: number): void }
+interface CameraControls {
+  data: { followingPlayer: Marker | null };
+  start?(manager: CameraManager): void;
+  stop?(): void;
+  update(delta: number, map: unknown): void;
+}
+interface CameraManager {
+  position: Vector;
+  distance: number;
+  rotation: number;
+  angle: number;
+  tilt: number;
+  ortho: number;
+  controls: CameraControls | null;
+  updateCamera(): void;
+}
 interface Marker {
   position: Vector;
   visible: boolean;
@@ -16,17 +32,33 @@ interface MarkerSet {
   remove(object: Marker | MarkerSet): void;
   clear(): void;
 }
+export interface BlueMapColor {
+  r: number; g: number; b: number;
+  clone(): BlueMapColor;
+  setRGB(r: number, g: number, b: number): BlueMapColor;
+}
+interface MapVisualData {
+  id: string;
+  skyColor: BlueMapColor;
+  voidColor: BlueMapColor;
+  ambientLight: number;
+  skyLight: number;
+}
 export interface BlueMapApp {
   popupMarkerSet: MarkerSet;
   events: EventTarget;
   mapViewer: {
-    data: { mapState: string };
-    map: { data: { id: string } } | null;
-    controlsManager: { position: Vector; distance: number; angle: number; ortho: number; updateCamera(): void };
+    data: { mapState: string; uniforms: {
+      sunlightStrength: { value: number }; ambientLight: { value: number };
+      skyColor: { value: BlueMapColor }; voidColor: { value: BlueMapColor };
+    } };
+    map: { data: MapVisualData } | null;
+    renderer: { domElement: HTMLCanvasElement };
+    controlsManager: CameraManager;
     redraw(): void;
     updateLoadedMapArea(): void;
   };
-  mapControls: { data: { followingPlayer: Marker | null }; followPlayerMarker(marker: Marker): void; stopFollowingPlayerMarker(): void };
+  mapControls: { data: { followingPlayer: Marker | null }; reset(): void; followPlayerMarker(marker: Marker): void; stopFollowingPlayerMarker(): void };
   mapsMap: Map<string, unknown>;
   switchMap(id: string, reset?: boolean): Promise<void>;
   updateMap(): Promise<void>;
@@ -56,13 +88,21 @@ export function avatar(name: string): string {
   ctx.fillStyle = '#263637'; ctx.fillRect(4, 7, 2, 2); ctx.fillRect(10, 7, 2, 2); ctx.fillRect(6, 11, 4, 1);
   const data = canvas.toDataURL(); avatars.set(name, data); return data;
 }
-interface Entry { marker: Marker; target: Position; dimension: string; name: string; bubbles: HTMLElement; speech: HTMLElement; lastChat: string }
+const markerHeight = 2.3;
+const eyeHeight = 1.62;
+const radians = Math.PI / 180;
+interface Entry {
+  marker: Marker; target: Position; rotation: Rotation; targetRotation: Rotation | null;
+  dimension: string; name: string; bubbles: HTMLElement; speech: HTMLElement; lastChat: string;
+}
 export class SandTableLayer {
   private readonly layer: MarkerSet;
   private readonly entries = new Map<string, Entry>();
   private readonly trailLayer: MarkerSet;
   private trailDimension: string | null = null;
   private following: string | null = null;
+  private overview: { controls: CameraControls | null; distance: number; angle: number; ortho: number; tilt: number } | null = null;
+  private playerViewControls: CameraControls | null = null;
   private selected: string | null = null;
   private bubblesEnabled = true;
   private reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -74,6 +114,20 @@ export class SandTableLayer {
     app.popupMarkerSet.add(this.layer); app.popupMarkerSet.add(this.trailLayer);
     app.events.addEventListener('bluemapRenderFrame', event => this.frame((event as CustomEvent<{ delta: number }>).detail.delta));
     app.events.addEventListener('bluemapMapChanged', () => { onMap(this.mapId()); this.visibility(); });
+    const canvas = app.mapViewer.renderer.domElement;
+    let drag: { id: number; x: number; y: number } | null = null;
+    canvas.addEventListener('pointerdown', event => { drag = { id: event.pointerId, x: event.clientX, y: event.clientY }; });
+    window.addEventListener('pointermove', event => {
+      if (this.following && drag?.id === event.pointerId && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) > 4) this.stopFollowing();
+    });
+    const endDrag = (): void => { drag = null; };
+    window.addEventListener('pointerup', endDrag); window.addEventListener('pointercancel', endDrag);
+    canvas.addEventListener('wheel', () => { if (this.following) this.stopFollowing(); }, { passive: true });
+    window.addEventListener('keydown', event => {
+      const target = event.target;
+      if (event.ctrlKey || event.metaKey || (target instanceof HTMLElement && (target.isContentEditable || target.closest('input, textarea, select')))) return;
+      if (this.following && /^(Key[WASD]|Arrow(Up|Down|Left|Right)|Page(Up|Down)|Delete|End|Insert|Home|Numpad(Add|Subtract))$/.test(event.code)) this.stopFollowing();
+    }, { capture: true });
     onMap(this.mapId());
   }
   mapId(): string { return this.app.mapViewer.map?.data.id ?? 'overworld'; }
@@ -86,7 +140,7 @@ export class SandTableLayer {
       let entry = this.entries.get(player.id);
       if (!entry) {
         const marker = new window.BlueMap!.HtmlMarker('dashboard-' + player.id);
-        marker.updateFromData({ position: { ...player.position, y: player.position.y + 2.3 }, label: player.name, html: '', classes: ['dashboard-marker'], listed: false });
+        marker.updateFromData({ position: { ...player.position, y: player.position.y + markerHeight }, label: player.name, html: '', classes: ['dashboard-marker'], listed: false });
         const bubbles = document.createElement('div'); bubbles.className = 'md-bubbles'; bubbles.setAttribute('aria-live', 'polite');
         const label = document.createElement('button'); label.type = 'button'; label.className = 'md-player-label'; label.setAttribute('aria-label', '查看玩家 ' + player.name);
         const image = document.createElement('img'); image.src = avatar(player.name); image.alt = ''; image.className = 'md-pixel-avatar';
@@ -98,12 +152,17 @@ export class SandTableLayer {
         marker.onClick = () => { this.onSelect(player.id); return true; };
         label.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); this.onSelect(player.id); } });
         this.layer.add(marker);
-        entry = { marker, target: player.position, dimension: player.dimension, name: player.name, bubbles, speech, lastChat: '' };
+        entry = { marker, target: player.position, rotation: { ...(player.rotation ?? { yaw: 0, pitch: 0 }) }, targetRotation: player.rotation ?? null,
+          dimension: player.dimension, name: player.name, bubbles, speech, lastChat: '' };
         this.entries.set(player.id, entry);
       }
-      const next = { ...player.position, y: player.position.y + 2.3 };
+      const next = { ...player.position, y: player.position.y + markerHeight };
       const distance = Math.hypot(next.x - entry.marker.position.x, next.y - entry.marker.position.y, next.z - entry.marker.position.z);
-      if (entry.dimension !== player.dimension || distance > 80 || this.reducedMotion) entry.marker.position.set(next.x, next.y, next.z);
+      if (entry.dimension !== player.dimension || distance > 80 || this.reducedMotion) {
+        entry.marker.position.set(next.x, next.y, next.z);
+        if (player.rotation) entry.rotation = { ...player.rotation };
+      }
+      entry.targetRotation = player.rotation ?? null;
       entry.target = next; entry.dimension = player.dimension;
       entry.marker.element.classList.toggle('is-selected', player.id === selected);
       entry.marker.element.classList.toggle('is-stale', !player.positionAt || now - player.positionAt > 15_000);
@@ -127,17 +186,26 @@ export class SandTableLayer {
   }
   private visibility(): void {
     const id = this.mapId();
-    for (const entry of this.entries.values()) entry.marker.visible = entry.dimension.replace(/^minecraft:/, '') === id;
+    for (const [playerId, entry] of this.entries) entry.marker.visible = playerId !== this.following && entry.dimension.replace(/^minecraft:/, '') === id;
     this.trailLayer.visible = this.trailDimension?.replace(/^minecraft:/, '') === id;
   }
   private frame(delta: number): void {
-    if (this.following && !this.app.mapControls.data.followingPlayer) { this.following = null; this.onFollow(false); }
+    if (this.following && (!this.app.mapControls.data.followingPlayer || this.app.mapViewer.controlsManager.controls !== this.playerViewControls)) this.stopFollowing();
     let moving = false;
     for (const entry of this.entries.values()) {
       const pos = entry.marker.position;
       const factor = this.reducedMotion ? 1 : 1 - Math.exp(-Math.min(delta, 100) / 240);
       const distance = Math.hypot(pos.x - entry.target.x, pos.y - entry.target.y, pos.z - entry.target.z);
       if (distance > 0.015) { pos.set(pos.x + (entry.target.x - pos.x) * factor, pos.y + (entry.target.y - pos.y) * factor, pos.z + (entry.target.z - pos.z) * factor); moving = true; }
+      if (entry.targetRotation) {
+        const yawDelta = (entry.targetRotation.yaw - entry.rotation.yaw) * radians;
+        // Turn across +/-180 using the shorter arc, including when a player spins several times.
+        const yaw = Math.atan2(Math.sin(yawDelta), Math.cos(yawDelta)) / radians;
+        const pitch = entry.targetRotation.pitch - entry.rotation.pitch;
+        if (Math.abs(yaw) > 0.01 || Math.abs(pitch) > 0.01) {
+          entry.rotation.yaw += yaw * factor; entry.rotation.pitch += pitch * factor; moving = true;
+        }
+      }
       entry.bubbles.hidden = !this.bubblesEnabled || (this.app.mapViewer.controlsManager.distance > 700 && entry.name !== this.entries.get(this.selected ?? '')?.name);
     }
     // Keep the selected player's speech readable when several players share one screen position.
@@ -150,30 +218,69 @@ export class SandTableLayer {
       const collides = rects.some(other => rect.left < other.right + 8 && rect.right > other.left - 8 && rect.top < other.bottom + 8 && rect.bottom > other.top - 8);
       if (collides) entry.bubbles.style.visibility = 'hidden'; else rects.push(rect);
     }
+    if (this.following) this.updatePlayerView();
     if (moving) this.app.mapViewer.redraw();
+  }
+  private updatePlayerView(): void {
+    const entry = this.entries.get(this.following ?? '');
+    if (!entry || entry.dimension.replace(/^minecraft:/, '') !== this.mapId()) return;
+    const cm = this.app.mapViewer.controlsManager;
+    const pos = entry.marker.position;
+    cm.position.set(pos.x, pos.y - markerHeight + eyeHeight, pos.z);
+    cm.distance = 0; cm.ortho = 0; cm.tilt = 0;
+    cm.rotation = (entry.rotation.yaw - 180) * radians;
+    cm.angle = (90 - entry.rotation.pitch) * radians;
+    cm.updateCamera();
   }
   async focus(player: Player, follow = false): Promise<boolean> {
     if (!player.position) return false;
     const mapId = player.dimension.replace(/^minecraft:/, '');
     if (!this.app.mapsMap.has(mapId)) return false;
     if (this.mapId() !== mapId) await this.app.switchMap(mapId, false);
-    const cm = this.app.mapViewer.controlsManager;
-    cm.position.set(player.position.x, player.position.y, player.position.z); cm.distance = 110; cm.angle = Math.PI / 4; cm.ortho = 0; cm.updateCamera();
-    this.app.mapViewer.updateLoadedMapArea();
     const entry = this.entries.get(player.id);
-    if (follow && entry) { this.following = player.id; this.app.mapControls.followPlayerMarker(entry.marker); }
-    else { this.following = null; this.app.mapControls.stopFollowingPlayerMarker(); }
+    const cm = this.app.mapViewer.controlsManager;
+    this.stopFollowing();
+    if (follow && entry) {
+      this.overview = { controls: cm.controls, distance: Math.max(15, cm.distance), angle: cm.angle, ortho: cm.ortho, tilt: cm.tilt };
+      const controls = cm.controls;
+      // Keep normal input listeners so a drag, wheel or navigation key can hand control back.
+      // Bypass the map controls' terrain-height, minimum-distance and pitch clamps while following.
+      this.playerViewControls = { data: this.app.mapControls.data,
+        start: manager => controls?.start?.(manager), stop: () => controls?.stop?.(), update: () => this.updatePlayerView() };
+      cm.controls = this.playerViewControls;
+      this.app.mapControls.reset();
+      this.following = player.id;
+      entry.marker.position.set(player.position.x, player.position.y + markerHeight, player.position.z);
+      if (player.rotation) entry.rotation = { ...player.rotation };
+      this.app.mapControls.followPlayerMarker(entry.marker);
+      this.updatePlayerView();
+    } else {
+      cm.position.set(player.position.x, player.position.y, player.position.z); cm.distance = 110; cm.angle = Math.PI / 4; cm.ortho = 0; cm.updateCamera();
+    }
+    this.visibility(); this.app.mapViewer.updateLoadedMapArea();
     this.onFollow(!!(follow && entry));
     this.app.mapViewer.redraw();
     return !!(follow && entry);
   }
-  stopFollowing(): void { this.following = null; this.app.mapControls.stopFollowingPlayerMarker(); this.onFollow(false); }
+  stopFollowing(): void {
+    this.following = null;
+    const cm = this.app.mapViewer.controlsManager;
+    if (this.overview) {
+      const view = this.overview;
+      if (cm.controls === this.playerViewControls) cm.controls = view.controls;
+      cm.distance = view.distance; cm.angle = view.angle; cm.ortho = view.ortho; cm.tilt = view.tilt;
+      this.overview = null; this.playerViewControls = null;
+      cm.updateCamera();
+    }
+    this.app.mapControls.stopFollowingPlayerMarker(); this.onFollow(false); this.visibility(); this.app.mapViewer.redraw();
+  }
   async switchMap(id: string): Promise<void> {
     this.stopFollowing();
     if (this.app.mapsMap.has(id)) await this.app.switchMap(id);
     else location.assign('/map/#' + id);
   }
   camera(mode: 'top' | 'perspective' | 'in' | 'out'): void {
+    this.stopFollowing();
     const cm = this.app.mapViewer.controlsManager;
     if (mode === 'top') { cm.angle = 0; cm.ortho = 1; }
     else if (mode === 'perspective') { cm.angle = Math.PI / 4; cm.ortho = 0; }

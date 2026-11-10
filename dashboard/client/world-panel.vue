@@ -5,6 +5,7 @@ import { speechState, toggleSpeech } from './chat-speech.js';
 import { avatar, playerColor } from './bluemap.js';
 import { changeCamera, changeMap, focusPlayer, refreshMap, selectPlayer, showTrail, stopFollowing } from './main.js';
 import type { Player } from '../server/types.js';
+import { environmentView } from './environment-model.js';
 
 const playersOpen = ref(window.innerWidth >= 760);
 const chatOpen = ref(window.innerWidth >= 1000);
@@ -26,6 +27,8 @@ const activities = computed(() => [...state.activity].reverse().slice(0, 30));
 const dimensions = [{ id: 'overworld', name: '主世界', symbol: '◈' }, { id: 'the_nether', name: '下界', symbol: '◇' }, { id: 'the_end', name: '末地', symbol: '✧' }];
 const dimensionNames: Record<string, string> = { 'minecraft:overworld': '主世界', 'minecraft:the_nether': '下界', 'minecraft:the_end': '末地' };
 const clock = computed(() => new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(state.now));
+const environment = computed(() => environmentView(state.environment, state.currentMap, state.now));
+const environmentTitle = computed(() => state.currentMap !== 'overworld' ? '此维度保持自身环境，不受主世界昼夜和天气影响' : environment.value.stale ? '环境数据待更新，保留最近一次状态' : '与游戏时间和天气同步');
 const speechLabel = computed(() => speechState.changing ? '切换中' : speechState.loading ? '加载声音4' : !speechState.supported ? '声音4不可用' : speechState.error ? '重试播报' : speechState.ready ? (speechState.speaking ? '正在播报' : '后台播报已开') : '开启播报');
 const speechTitle = computed(() => speechState.error ?? (speechState.ready ? '关闭本机后台语音播报（声音4）' : '开启本机后台语音播报（声音4），关闭浏览器后仍会继续'));
 const itemNames: Record<string, string> = {
@@ -119,7 +122,7 @@ onUnmounted(() => { if (detailTimer) clearInterval(detailTimer); });
       <div class="md-detail-identity"><img :src="avatar(currentPlayer.name)" alt="" class="md-avatar large" /><div><h2>{{ currentPlayer.name }}</h2><span>{{ currentPlayer.bot ? '机器人玩家' : '真人玩家' }} · {{ currentPlayer.online ? dimensionNames[currentPlayer.dimension] : '已离线' }}</span></div></div>
       <div class="md-detail-position">{{ coord(currentPlayer) }}<span>{{ age(currentPlayer.positionAt) }}</span></div>
       <div class="md-vitals"><div><span>生命</span><b>♥ {{ currentPlayer.health === null ? '—' : currentPlayer.health.toFixed(0) }}<small> / 20</small></b><i><em :style="{ width: Math.min(100, (currentPlayer.health ?? 0) * 5) + '%' }"></em></i></div><div><span>饥饿</span><b>◆ {{ currentPlayer.food ?? '—' }}<small> / 20</small></b><i class="food"><em :style="{ width: Math.min(100, (currentPlayer.food ?? 0) * 5) + '%' }"></em></i></div></div>
-      <div class="md-detail-actions"><button :disabled="!state.engineReady || !currentPlayer.position || !currentPlayer.online" @click="focusPlayer(currentPlayer)">⌖ 定位</button><button class="primary" :class="{ following: state.follow }" :disabled="!state.engineReady || !currentPlayer.position || !currentPlayer.online" @click="follow">{{ state.follow ? '停止跟随' : '跟随玩家' }}</button></div>
+      <div class="md-detail-actions"><button :disabled="!state.engineReady || !currentPlayer.position || !currentPlayer.online" @click="focusPlayer(currentPlayer)">⌖ 定位</button><button class="primary" :class="{ following: state.follow }" :title="state.follow ? '停止跟随并返回沙盘' : '以玩家的第一人称视角跟随'" :disabled="!state.engineReady || !currentPlayer.position || !currentPlayer.online" @click="follow">{{ state.follow ? '停止跟随' : '跟随玩家' }}</button></div>
       <label class="md-checkbox"><input v-model="trail" type="checkbox" :disabled="!state.engineReady" />显示最近 15 分钟轨迹</label>
       <div class="md-detail-scroll">
         <div class="md-section-label">装备 <span>等级 {{ currentPlayer.xp ?? '—' }}</span></div>
@@ -143,7 +146,10 @@ onUnmounted(() => { if (detailTimer) clearInterval(detailTimer); });
     <button v-else class="md-floating md-open-chat" @click="chatOpen = true">▤ 聊天 <span v-if="state.chat.length">{{ state.chat.length }}</span></button>
 
     <div class="md-map-tools" aria-label="地图视角"><button :disabled="!state.engineReady" title="放大" aria-label="放大地图" @click="changeCamera('in')">＋</button><button :disabled="!state.engineReady" title="缩小" aria-label="缩小地图" @click="changeCamera('out')">−</button><span></span><button :disabled="!state.engineReady" @click="changeCamera('perspective')">3D</button><button :disabled="!state.engineReady" @click="changeCamera('top')">俯视</button><button :disabled="!state.engineReady" title="重新加载当前地图" aria-label="刷新地图" @click="refreshMap">↻</button></div>
-    <footer class="md-world-status"><span v-if="state.map.syncing" class="md-updating"><i></i>地图更新中</span><span v-else-if="state.map.error" class="md-warning" :title="state.map.error">地图同步待恢复</span><span v-else>存档 {{ time(state.map.snapshotAt) }}</span><span class="md-status-divider">·</span><span>拖动浏览 · 滚轮缩放</span></footer>
+    <footer class="md-world-status">
+      <span class="md-environment-status" :class="{ 'md-warning': state.currentMap === 'overworld' && environment.stale }" :title="environmentTitle" :data-phase="environment.phase" :data-weather="environment.weather">{{ environment.label }}</span>
+      <span v-if="state.map.syncing" class="md-updating"><i></i>地图更新中</span><span v-else-if="state.map.error" class="md-warning" :title="state.map.error">地图同步待恢复</span><span v-else>存档 {{ time(state.map.snapshotAt) }}</span><span class="md-status-divider">·</span><span>拖动浏览 · 滚轮缩放</span>
+    </footer>
     <a class="md-attribution" href="https://bluemap.bluecolored.de/" target="_blank" rel="noopener noreferrer">BlueMap</a>
 
     <div v-if="!state.engineReady" class="md-map-loading"><div class="md-loading-symbol">◈</div><h1>正在打开你的世界</h1><p>{{ state.map.error ?? (state.map.syncing ? '正在生成真实地形与建筑' : '正在加载三维地图') }}</p><span>{{ state.map.progress }}</span></div>

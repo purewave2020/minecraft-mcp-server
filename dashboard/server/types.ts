@@ -1,4 +1,5 @@
 export interface Position { x: number; y: number; z: number }
+export interface Rotation { yaw: number; pitch: number }
 export interface Item { name: string; count: number; slot?: string | number }
 export interface Player {
   id: string;
@@ -7,6 +8,7 @@ export interface Player {
   online: boolean;
   dimension: string;
   position: Position | null;
+  rotation: Rotation | null;
   health: number | null;
   food: number | null;
   xp: number | null;
@@ -38,6 +40,14 @@ export interface BackgroundSpeechStatus {
   voiceName: string;
   voiceId: string;
   revision: number;
+}
+export type Weather = 'clear' | 'rain' | 'thunder';
+export interface EnvironmentState {
+  timeOfDay: number | null;
+  timeRate: number;
+  timeObservedAt: number | null;
+  weather: Weather | null;
+  weatherObservedAt: number | null;
 }
 export interface WorldMap {
   id: string;

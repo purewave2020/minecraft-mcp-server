@@ -13,7 +13,7 @@ test('isolated HTTP service authenticates every route and serves player details 
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'dashboard-http-test-'));
   const store = new Store(path.join(directory, 'dashboard.sqlite'));
   const world = new WorldState(store, new Set());
-  world.entity('Fixture', { Pos: [1, 72, 3], Health: 20, foodLevel: 16, Inventory: [{ Slot: 0, id: 'minecraft:stone', count: 3 }] }, Date.now());
+  world.entity('Fixture', { Pos: [1, 72, 3], Rotation: [-90, -25], Health: 20, foodLevel: 16, Inventory: [{ Slot: 0, id: 'minecraft:stone', count: 3 }] }, Date.now());
   const player = world.get('Fixture'); store.close();
   const child = spawn(process.execPath, ['--import=tsx', fileURLToPath(new URL('../server/main.ts', import.meta.url))], {
     env: { ...process.env, DASHBOARD_DATA: directory, DASHBOARD_PORT: '0', DASHBOARD_HOST: '127.0.0.1', DASHBOARD_PASSWORD: 'fixture-password', DASHBOARD_OFFLINE: '1', DASHBOARD_SKIP_RENDER: '1' },
@@ -39,9 +39,12 @@ test('isolated HTTP service authenticates every route and serves player details 
     assert.equal((await fetch(base + '/health', { headers })).status, 200);
     const snapshot = await fetch(base + '/api/snapshot', { headers }).then(response => response.json());
     assert.equal(snapshot.collector.connected, false); assert.equal(snapshot.players.length, 1);
+    assert.deepEqual(snapshot.players[0].rotation, { yaw: -90, pitch: -25 });
+    assert.equal(snapshot.environment.timeOfDay, null); assert.equal(snapshot.environment.weather, null);
     assert.equal(snapshot.speech.voiceId, 'com.apple.siri.natural.zh-CN-D');
     const detail = await fetch(base + '/api/players/' + player.id, { headers }).then(response => response.json());
     assert.equal(detail.name, 'Fixture'); assert.equal(detail.inventory[0].count, 3);
+    assert.deepEqual(detail.rotation, snapshot.players[0].rotation);
     const postSpeech = (body: unknown) => fetch(base + '/api/speech', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     for (const body of [{}, { enabled: 'false' }, null]) assert.equal((await postSpeech(body)).status, 400);
     assert.equal((await postSpeech({ enabled: true })).status, 503, 'offline tests must not access real audio');
