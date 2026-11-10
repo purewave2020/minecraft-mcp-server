@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import test from 'ava';
 import sinon from 'sinon';
 import { BotConnection } from '../src/bot-connection.js';
+import { MessageStore } from '../src/message-store.js';
 
 test('constructor initializes with correct state', (t) => {
   const config = { host: 'localhost', port: 25565, username: 'TestBot' };
@@ -206,4 +207,49 @@ test('a late end event from an old bot cannot disconnect its replacement', t => 
   old.emit('end', 'late disconnect');
   t.is(connection.getBot(), replacement as never); t.is(connection.getState(), 'connected');
   internals.bot = null; connection.cleanup();
+});
+
+
+test('server-confirmed self chat is readable by sender without entering the priority queue', t => {
+  const store = new MessageStore();
+  const connection = new BotConnection({ host: 'localhost', port: 0, username: 'GPTBot' }, {
+    onLog: () => {}, onChatMessage: (username, message) => store.addMessage(username, message)
+  });
+  const bot = Object.assign(new EventEmitter(), { username: 'GPTBot', quit: sinon.stub() });
+  const internals = connection as unknown as { bot: unknown; registerEventHandlers: (bot: unknown) => void };
+  internals.bot = bot;
+  internals.registerEventHandlers(bot);
+  t.teardown(() => connection.cleanup());
+
+  bot.emit('chat', 'GPTBot', '已采集1个粗铁');
+  bot.emit('chat', 'qingyage', '先回营地');
+
+  const own = store.read(100, 'GPTBot');
+  t.is(own.length, 1);
+  t.is(own[0].content, '已采集1个粗铁');
+  t.is(store.read(100).length, 2);
+  const priority = store.read(100, undefined, 0, true);
+  t.is(priority.length, 1);
+  t.is(priority[0].username, 'qingyage');
+});
+
+test('chat from a replaced bot connection cannot enter the current history', t => {
+  const onChatMessage = sinon.stub();
+  const connection = new BotConnection({ host: 'localhost', port: 0, username: 'GPTBot' }, {
+    onLog: () => {}, onChatMessage
+  });
+  const old = Object.assign(new EventEmitter(), { username: 'GPTBot' });
+  const replacement = Object.assign(new EventEmitter(), { username: 'GPTBot', quit: sinon.stub() });
+  const internals = connection as unknown as { bot: unknown; registerEventHandlers: (bot: unknown) => void };
+  internals.bot = old;
+  internals.registerEventHandlers(old);
+  internals.bot = replacement;
+  internals.registerEventHandlers(replacement);
+  t.teardown(() => connection.cleanup());
+
+  old.emit('chat', 'GPTBot', '过期消息');
+  old.emit('chat', 'qingyage', '过期指令');
+  replacement.emit('chat', 'GPTBot', '当前消息');
+
+  t.true(onChatMessage.calledOnceWithExactly('GPTBot', '当前消息'));
 });

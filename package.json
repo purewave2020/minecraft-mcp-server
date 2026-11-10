@@ -7,6 +7,7 @@
     "minecraft-mcp-server": "dist/main.js"
   },
   "ava": {
+    "files": ["tests/**/*.test.ts"],
     "extensions": [
       "ts"
     ],
@@ -22,7 +23,11 @@
     "test": "ava",
     "lint": "eslint \"{src,tests}/**/*.ts\"",
     "lint:fix": "eslint \"{src,tests}/**/*.ts\" --fix",
-    "test:runtime": "node --test tests/runtime.test.mjs"
+    "test:runtime": "node --test tests/runtime.test.mjs",
+    "dashboard:build": "npm --prefix dashboard run build",
+    "dashboard:start": "npm --prefix dashboard run service -- start",
+    "dashboard:stop": "npm --prefix dashboard run service -- stop",
+    "dashboard:status": "npm --prefix dashboard run service -- status"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",

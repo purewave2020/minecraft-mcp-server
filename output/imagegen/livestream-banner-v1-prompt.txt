@@ -1,0 +1,10 @@
+Generation mode: built-in image_gen
+Transparent background: true
+
+Use case: ads-marketing
+Asset type: livestream overlay banner, a usable transparent PNG graphic.
+Primary request: 制作一条简洁、精致的直播横幅底条。
+Style/medium: polished professional broadcast graphic with restrained layered surfaces and fine luminous edge detailing.
+Composition/framing: a single very long, slim horizontal banner, approximately 8:1 width to height, centered on a wide landscape canvas with a small transparent margin around it. Flat front view. Balanced end caps; broad uncluttered interior with sufficient contrast for a title to be added later in streaming software. Render the complete graphic with no clipped ends.
+Text: none; leave the banner blank.
+Constraints: genuinely transparent background outside the banner, preserve alpha. Only one finished banner asset; no presentation mockup, no surrounding scene, no characters, no objects, no logos, no watermark, no checkerboard drawn into the image. Clean edges and high resolution.

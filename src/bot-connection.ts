@@ -104,7 +104,7 @@ export class BotConnection {
       this.callbacks.onLog('info', `Bot connected successfully. Username: ${this.config.username}, Server: ${this.config.host}:${this.config.port}`);
     });
     bot.on('chat', (username, message) => {
-      if (this.bot === bot && username !== bot.username) this.callbacks.onChatMessage(username, message);
+      if (this.bot === bot) this.callbacks.onChatMessage(username, message);
     });
     bot.on('kicked', reason => {
       if (this.bot !== bot) return;

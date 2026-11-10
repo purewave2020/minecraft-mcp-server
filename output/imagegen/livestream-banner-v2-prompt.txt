@@ -1,0 +1,13 @@
+Generation mode: built-in image_gen, edit
+Transparent background: true
+
+Use case: text-localization
+Asset type: transparent PNG livestream overlay banner.
+Input image 1: edit target, the existing blue-and-gold horizontal banner.
+Primary request: add a bold Chinese livestream title and a smaller subtitle to the empty center of this banner.
+Text (verbatim), main title: "AI勇闯我的世界"
+Text (verbatim), subtitle: "从零开荒 · 挑战末影龙"
+Typography/layout: horizontally centered two-line typography entirely inside the existing dark blue panel. Main title is substantially larger, in bold, clean, highly legible Chinese display lettering with an ivory-white fill, a restrained gold rim and a subtle shadow. Subtitle is smaller and clean, with generous spacing. Give both lines comfortable padding from the blue panel's upper and lower edges. Both lines must be readable at livestream overlay scale. Render every Chinese character exactly as supplied.
+Invariants: preserve the original very long slim banner silhouette, blue panel, gold edging, luminous details, end caps, original landscape canvas and overall proportions. Add text only. Preserve genuine alpha transparency outside the banner. Keep the entire banner visible without cropping either end.
+Avoid: any extra text, logos, watermarks, new objects, background scenes, fake checkerboard, or additional panels.
+

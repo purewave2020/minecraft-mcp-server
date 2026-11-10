@@ -70,6 +70,8 @@ Double-check that right `--port` and `--host` parameters were used. Make sure to
 
 For the maintained LAN deployment, shared ViaProxy lifecycle, backups and recovery, see [operations](ops/README.md).
 
+For the local 3D world dashboard with all-player monitoring and public-chat bubbles, see [dashboard setup and operations](dashboard/README.md).
+
 Make sure Minecraft game is running and the world is opened to LAN. Then start Claude Desktop application and the bot should join the game. 
 
 **It could take some time for Claude Desktop to boot the MCP server**. The marker that the server has booted successfully:
