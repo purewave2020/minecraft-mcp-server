@@ -1,7 +1,7 @@
 import { createApp, watch } from 'vue';
 import Panel from './world-panel.vue';
 import { connect, state } from './state.js';
-import { SandTableLayer } from './bluemap.js';
+import { SandTableLayer, type FollowView } from './bluemap.js';
 import { EnvironmentLayer } from './environment-layer.js';
 import type { Player } from '../server/types.js';
 import './style.css';
@@ -13,11 +13,21 @@ let layer: SandTableLayer | null = null;
 let environmentLayer: EnvironmentLayer | null = null;
 let refreshing = false;
 export function selectPlayer(id: string): void {
-  if (state.selectedId !== id) stopFollowing();
+  if (state.selectedId === id) return;
+  const following = state.follow;
   state.selectedId = id; localStorage.setItem('minecraft-dashboard-selected', id);
+  if (following) {
+    const player = state.players.find(value => value.id === id);
+    if (player?.online && player.position) void focusPlayer(player, true);
+    else stopFollowing();
+  }
 }
-export async function focusPlayer(player: Player, follow = false): Promise<void> { state.follow = (await layer?.focus(player, follow)) === true; }
+export async function focusPlayer(player: Player, follow = false): Promise<void> { await layer?.focus(player, follow); }
 export function stopFollowing(): void { state.follow = false; layer?.stopFollowing(); }
+export function changeFollowView(view: FollowView): void {
+  state.followView = view; localStorage.setItem('minecraft-dashboard-follow-view', view);
+  layer?.setFollowView(view);
+}
 export async function changeMap(id: string): Promise<void> { state.follow = false; await layer?.switchMap(id); }
 export function changeCamera(mode: 'top' | 'perspective' | 'in' | 'out'): void { layer?.camera(mode); }
 export async function showTrail(player: Player, show: boolean): Promise<void> {
@@ -38,6 +48,7 @@ const engineCheck = setInterval(() => {
   if (!window.bluemap?.popupMarkerSet || !window.BlueMap?.HtmlMarker || !window.bluemap.mapViewer.map) return;
   clearInterval(engineCheck);
   layer = new SandTableLayer(window.bluemap, selectPlayer, id => { state.currentMap = id; }, following => { state.follow = following; });
+  layer.setFollowView(state.followView);
   environmentLayer = new EnvironmentLayer(window.bluemap);
   watch(() => [state.environment, state.now], () => environmentLayer!.sync(state.environment, state.now), { deep: true, immediate: true });
   document.title = '世界沙盘';
@@ -46,10 +57,10 @@ const engineCheck = setInterval(() => {
     layer.camera('perspective'); localStorage.setItem('minecraft-dashboard-view-initialized', 'true');
   }
   const sync = (): void => {
-    layer!.sync(state.players, state.chat, state.selectedId, state.now, state.bubbles);
+    layer!.sync(state.players, state.chat, state.selectedId, state.now, state.bubbles, state.entities);
     const player = state.players.find(value => value.id === state.selectedId);
     if (state.follow && player && player.dimension.replace(/^minecraft:/, '') !== state.currentMap) void layer!.focus(player, true);
   };
-  watch(() => [state.players, state.chat, state.selectedId, state.now, state.bubbles], sync, { deep: true, immediate: true });
+  watch(() => [state.players, state.chat, state.selectedId, state.now, state.bubbles, state.entities], sync, { deep: true, immediate: true });
 }, 100);
-window.addEventListener('beforeunload', () => environmentLayer?.dispose());
+window.addEventListener('beforeunload', () => { environmentLayer?.dispose(); layer?.dispose(); });

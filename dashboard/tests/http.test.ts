@@ -39,6 +39,7 @@ test('isolated HTTP service authenticates every route and serves player details 
     assert.equal((await fetch(base + '/health', { headers })).status, 200);
     const snapshot = await fetch(base + '/api/snapshot', { headers }).then(response => response.json());
     assert.equal(snapshot.collector.connected, false); assert.equal(snapshot.players.length, 1);
+    assert.deepEqual(snapshot.entities, []);
     assert.deepEqual(snapshot.players[0].rotation, { yaw: -90, pitch: -25 });
     assert.equal(snapshot.environment.timeOfDay, null); assert.equal(snapshot.environment.weather, null);
     assert.equal(snapshot.speech.voiceId, 'com.apple.siri.natural.zh-CN-D');

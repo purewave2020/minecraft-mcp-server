@@ -1,5 +1,17 @@
 export interface Position { x: number; y: number; z: number }
 export interface Rotation { yaw: number; pitch: number }
+export interface WorldEntity {
+  id: string;
+  type: string;
+  name: string;
+  dimension: string;
+  position: Position;
+  rotation: Rotation;
+  baby: boolean;
+  color: number | null;
+  sheared: boolean;
+  observedAt: number;
+}
 export interface Item { name: string; count: number; slot?: string | number }
 export interface Player {
   id: string;

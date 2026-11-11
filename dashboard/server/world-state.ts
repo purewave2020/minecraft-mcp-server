@@ -3,6 +3,7 @@ import { parseSnbt, type Nbt } from './snbt.js';
 import type { ChatMessage, Item, Player, Position, Rotation } from './types.js';
 import { Store } from './store.js';
 import { EnvironmentTracker } from './environment.js';
+import { EntityTracker } from './entities.js';
 
 export function offlineId(name: string): string {
   const bytes = createHash('md5').update(`OfflinePlayer:${name}`).digest();
@@ -41,8 +42,10 @@ function logTime(text: string, receivedAt: number): number {
 export class WorldState {
   readonly players = new Map<string, Player>();
   readonly environment: EnvironmentTracker;
+  readonly entities: EntityTracker;
   constructor(readonly store: Store, readonly botNames: Set<string>) {
     this.environment = new EnvironmentTracker(store);
+    this.entities = new EntityTracker(store);
     for (const player of store.players()) this.players.set(player.name, { ...player, rotation: player.rotation ?? null });
   }
   get(name: string): Player {
@@ -124,6 +127,7 @@ export class WorldState {
     }
     const clean = body.replace(/^System chat: /, '');
     if (this.environment.line(clean, timestamp, historical)) return;
+    if (this.entities.line(clean, timestamp, historical)) return;
     const data = /^([A-Za-z0-9_]{1,16}) has the following entity data: (.+)$/.exec(clean);
     if (data) {
       if (!historical) {

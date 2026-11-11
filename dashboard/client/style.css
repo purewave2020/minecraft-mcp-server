@@ -30,6 +30,8 @@ body.minecraft-dashboard-active>#app{display:none!important}
 @media(min-width:760px) and (max-width:1100px){.md-detail.with-chat{max-height:calc(100vh - 456px)}}
 .md-speech-toggle{display:flex;align-items:center;justify-content:center;gap:6px;padding:6px 9px;border-radius:6px;background:#c0e2d20c;color:#a6b9ad!important;font-size:11px!important;flex-shrink:0}.md-speech-toggle:hover{background:#a3e4cb1c}.md-speech-toggle.active{background:#a3e4cb1a;color:#a3e4cb!important}.md-speech-toggle svg{width:18px;height:18px;stroke:currentColor;stroke-width:1.6;fill:none;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
 .md-weather-layer{position:absolute;inset:0;width:100%;height:100%;pointer-events:none!important}
+.md-follow-view{margin-top:10px;margin-bottom:0;flex-shrink:0}
+@media(max-width:759px){.md-detail.following-third-person{padding-bottom:12px}.md-detail.following-third-person .md-detail-position,.md-detail.following-third-person>.md-checkbox,.md-detail.following-third-person .md-detail-scroll{display:none}}
 .md-environment-status{display:inline-block;margin-right:12px;padding-right:12px;border-right:1px solid #c5e1d733;font-variant-numeric:tabular-nums;pointer-events:auto}
 @media(max-width:759px){.md-world-status{max-width:calc(100vw - 20px)}.md-environment-status{margin-right:8px;padding-right:8px;font-size:9px}}
 @media(max-width:759px){.md-speech-toggle{width:30px;height:30px;padding:6px}.md-speech-toggle span{display:none}.md-top-status{gap:8px}}

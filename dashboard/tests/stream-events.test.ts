@@ -33,9 +33,31 @@ test('SSE resynchronizes expired and reset cursors, then streams new live events
   }
 });
 
-test('a slow SSE reader is ended once without writing the remaining backlog or leaking a listener', () => {
+test('a large SSE frame pauses writes until drain without disconnecting a healthy reader or reordering events', () => {
   const store = new Store(':memory:');
-  for (let i = 0; i < 10; i++) store.event('sample', { i });
+  class Response extends EventEmitter {
+    chunks: string[] = []; ends = 0; blocked = true;
+    writeHead(): void {}
+    write(text: string): boolean { this.chunks.push(text); return !this.blocked; }
+    end(): void { this.ends++; }
+  }
+  const response = new Response();
+  try {
+    store.event('world.entities', { entities: 'x'.repeat(40_000) });
+    streamEvents(response as unknown as ServerResponse, store, 0, () => ({}));
+    store.event('next', { value: 1 }); store.event('next', { value: 2 });
+    assert.equal(response.chunks.length, 1); assert.equal(response.ends, 0);
+    assert.equal(store.listenerCount('event'), 1);
+    response.blocked = false; response.emit('drain');
+    assert.match(response.chunks.join(''), /"value":1[\s\S]+"value":2/);
+    assert.equal(response.ends, 0);
+    response.emit('close'); assert.equal(store.listenerCount('event'), 0); assert.equal(response.listenerCount('drain'), 0);
+  } finally { response.emit('close'); store.close(); }
+});
+
+test('a slow SSE reader is ended once when its bounded queue fills, without leaking a listener', () => {
+  const store = new Store(':memory:');
+  for (let i = 0; i < 10; i++) store.event('sample', { i, payload: 'x'.repeat(40_000) });
   class SlowResponse extends EventEmitter {
     writes = 0; ends = 0;
     writeHead(): void {}

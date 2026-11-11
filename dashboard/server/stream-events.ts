@@ -2,21 +2,45 @@ import type { ServerResponse } from 'node:http';
 import type { DashboardEvent } from './types.js';
 import type { Store } from './store.js';
 
-/** End slow streams after flushing their buffer; EventSource resumes from the last delivered ID. */
+/** Respect backpressure for large entity frames; bound genuinely slow readers and allow SSE resume. */
 export function streamEvents(response: ServerResponse, store: Store, cursor: number, snapshot: () => Record<string, unknown>): void {
   response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
   let closed = false;
+  let paused = false;
+  let queuedBytes = 0;
+  const pending: string[] = [];
   let heartbeat: NodeJS.Timeout | undefined;
+  let drainTimeout: NodeJS.Timeout | undefined;
   const cleanup = (): void => {
     closed = true;
     clearInterval(heartbeat);
+    clearTimeout(drainTimeout);
+    pending.length = 0; queuedBytes = 0;
+    response.off('drain', drain);
     store.off('event', send);
   };
+  const finish = (): void => { if (!closed) { cleanup(); response.end(); } };
   const write = (text: string): void => {
     if (closed) return;
-    if (!response.write(text)) { cleanup(); response.end(); }
+    if (paused) {
+      queuedBytes += Buffer.byteLength(text);
+      if (queuedBytes > 256 * 1024) { finish(); return; }
+      pending.push(text); return;
+    }
+    if (!response.write(text)) {
+      paused = true;
+      drainTimeout = setTimeout(finish, 10_000);
+    }
   };
+  function drain(): void {
+    if (closed) return;
+    paused = false; clearTimeout(drainTimeout);
+    while (pending.length && !paused && !closed) {
+      const text = pending.shift()!; queuedBytes -= Buffer.byteLength(text); write(text);
+    }
+  }
   const send = (event: DashboardEvent): void => write(`id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`);
+  response.on('drain', drain);
   response.on('close', cleanup);
   response.on('error', cleanup);
   const backlog = store.events(cursor);

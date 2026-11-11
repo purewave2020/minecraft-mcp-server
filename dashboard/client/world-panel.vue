@@ -3,7 +3,7 @@ import { computed, onUnmounted, ref, watch } from 'vue';
 import { state } from './state.js';
 import { speechState, toggleSpeech } from './chat-speech.js';
 import { avatar, playerColor } from './bluemap.js';
-import { changeCamera, changeMap, focusPlayer, refreshMap, selectPlayer, showTrail, stopFollowing } from './main.js';
+import { changeCamera, changeFollowView, changeMap, focusPlayer, refreshMap, selectPlayer, showTrail, stopFollowing } from './main.js';
 import type { Player } from '../server/types.js';
 import { environmentView } from './environment-model.js';
 
@@ -117,12 +117,16 @@ onUnmounted(() => { if (detailTimer) clearInterval(detailTimer); });
     </aside>
     <button v-else class="md-floating md-open-players" @click="playersOpen = true">◈ 玩家 <b>{{ online.length }}</b></button>
 
-    <aside v-if="currentPlayer" class="md-panel md-detail" :class="{ 'with-chat': chatOpen }">
+    <aside v-if="currentPlayer" class="md-panel md-detail" :class="{ 'with-chat': chatOpen, 'following-third-person': state.follow && state.followView === 'third' }">
       <div class="md-detail-top"><span class="md-eyebrow">PLAYER DETAILS</span><button class="md-icon-button" aria-label="关闭玩家详情" @click="state.selectedId = null; stopFollowing()">×</button></div>
       <div class="md-detail-identity"><img :src="avatar(currentPlayer.name)" alt="" class="md-avatar large" /><div><h2>{{ currentPlayer.name }}</h2><span>{{ currentPlayer.bot ? '机器人玩家' : '真人玩家' }} · {{ currentPlayer.online ? dimensionNames[currentPlayer.dimension] : '已离线' }}</span></div></div>
       <div class="md-detail-position">{{ coord(currentPlayer) }}<span>{{ age(currentPlayer.positionAt) }}</span></div>
       <div class="md-vitals"><div><span>生命</span><b>♥ {{ currentPlayer.health === null ? '—' : currentPlayer.health.toFixed(0) }}<small> / 20</small></b><i><em :style="{ width: Math.min(100, (currentPlayer.health ?? 0) * 5) + '%' }"></em></i></div><div><span>饥饿</span><b>◆ {{ currentPlayer.food ?? '—' }}<small> / 20</small></b><i class="food"><em :style="{ width: Math.min(100, (currentPlayer.food ?? 0) * 5) + '%' }"></em></i></div></div>
-      <div class="md-detail-actions"><button :disabled="!state.engineReady || !currentPlayer.position || !currentPlayer.online" @click="focusPlayer(currentPlayer)">⌖ 定位</button><button class="primary" :class="{ following: state.follow }" :title="state.follow ? '停止跟随并返回沙盘' : '以玩家的第一人称视角跟随'" :disabled="!state.engineReady || !currentPlayer.position || !currentPlayer.online" @click="follow">{{ state.follow ? '停止跟随' : '跟随玩家' }}</button></div>
+      <div class="md-detail-actions"><button :disabled="!state.engineReady || !currentPlayer.position || !currentPlayer.online" @click="focusPlayer(currentPlayer)">⌖ 定位</button><button class="primary" :class="{ following: state.follow }" :title="state.follow ? '停止跟随并保持当前视角' : state.followView === 'third' ? '从玩家身后近距离跟随' : '以玩家的第一人称视角跟随'" :disabled="!state.engineReady || !currentPlayer.position || !currentPlayer.online" @click="follow">{{ state.follow ? '停止跟随' : '跟随玩家' }}</button></div>
+      <div class="md-segmented md-follow-view" role="group" aria-label="跟随视角">
+        <button :class="{ active: state.followView === 'first' }" :aria-pressed="state.followView === 'first'" :disabled="!state.engineReady || !currentPlayer.position || !currentPlayer.online" title="从玩家眼睛位置观察" @click="changeFollowView('first')">第一人称</button>
+        <button :class="{ active: state.followView === 'third' }" :aria-pressed="state.followView === 'third'" :disabled="!state.engineReady || !currentPlayer.position || !currentPlayer.online" title="从玩家身后近距离观察" @click="changeFollowView('third')">第三人称</button>
+      </div>
       <label class="md-checkbox"><input v-model="trail" type="checkbox" :disabled="!state.engineReady" />显示最近 15 分钟轨迹</label>
       <div class="md-detail-scroll">
         <div class="md-section-label">装备 <span>等级 {{ currentPlayer.xp ?? '—' }}</span></div>

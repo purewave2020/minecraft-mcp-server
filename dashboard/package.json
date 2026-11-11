@@ -17,6 +17,7 @@
     "lint": "eslint .",
     "test:browser": "node tests/browser-smoke.mjs",
     "test:follow-browser": "node tests/follow-browser.mjs",
+    "test:entities-browser": "node tests/entities-browser.mjs",
     "test:speech-browser": "node tests/speech-browser.mjs",
     "test:environment-browser": "node tests/environment-browser.mjs",
     "setup-map": "python3 bridge/remote.py setup",
@@ -31,6 +32,7 @@
   "devDependencies": {
     "@eslint/js": "^9.39.5",
     "@types/node": "^25.2.3",
+    "@types/three": "^0.186.0",
     "@vitejs/plugin-vue": "^6.0.2",
     "eslint": "^9.39.5",
     "eslint-plugin-vue": "^10.12.1",

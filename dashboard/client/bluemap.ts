@@ -1,4 +1,8 @@
-import type { ChatMessage, Player, Position, Rotation } from '../server/types.js';
+import type { ChatMessage, Player, Position, Rotation, WorldEntity } from '../server/types.js';
+import type * as Three from 'three';
+import { EntityLayer } from './entity-layer.js';
+
+export type FollowView = 'first' | 'third';
 
 interface Vector extends Position { set(x: number, y: number, z: number): void }
 interface CameraControls {
@@ -6,6 +10,10 @@ interface CameraControls {
   start?(manager: CameraManager): void;
   stop?(): void;
   update(delta: number, map: unknown): void;
+}
+interface FlightControls extends CameraControls {
+  onMouseUp(event: MouseEvent): void;
+  hammer: { destroy(): void };
 }
 interface CameraManager {
   position: Vector;
@@ -52,13 +60,17 @@ export interface BlueMapApp {
       sunlightStrength: { value: number }; ambientLight: { value: number };
       skyColor: { value: BlueMapColor }; voidColor: { value: BlueMapColor };
     } };
-    map: { data: MapVisualData } | null;
+    map: { data: MapVisualData; hiresTileManager: { scene: Three.Object3D } | null } | null;
+    markers: Three.Scene;
+    camera: Three.Camera;
     renderer: { domElement: HTMLCanvasElement };
     controlsManager: CameraManager;
     redraw(): void;
     updateLoadedMapArea(): void;
   };
-  mapControls: { data: { followingPlayer: Marker | null }; reset(): void; followPlayerMarker(marker: Marker): void; stopFollowingPlayerMarker(): void };
+  mapControls: CameraControls & { reset(): void; followPlayerMarker(marker: Marker): void; stopFollowingPlayerMarker(): void };
+  freeFlightControls: CameraControls;
+  appState: { controls: { state: string } };
   mapsMap: Map<string, unknown>;
   switchMap(id: string, reset?: boolean): Promise<void>;
   updateMap(): Promise<void>;
@@ -66,7 +78,8 @@ export interface BlueMapApp {
 declare global {
   interface Window {
     bluemap?: BlueMapApp;
-    BlueMap?: { HtmlMarker: new (id: string) => Marker; MarkerSet: new (id: string) => MarkerSet };
+    BlueMap?: { HtmlMarker: new (id: string) => Marker; MarkerSet: new (id: string) => MarkerSet;
+      FreeFlightControls: new (canvas: HTMLCanvasElement) => FlightControls; Three: typeof Three };
     minecraftDashboard?: { selectPlayer(id: string): void; refresh(): Promise<void> };
   }
 }
@@ -90,6 +103,7 @@ export function avatar(name: string): string {
 }
 const markerHeight = 2.3;
 const eyeHeight = 1.62;
+const thirdPersonDistance = 3.5;
 const radians = Math.PI / 180;
 interface Entry {
   marker: Marker; target: Position; rotation: Rotation; targetRotation: Rotation | null;
@@ -99,15 +113,23 @@ export class SandTableLayer {
   private readonly layer: MarkerSet;
   private readonly entries = new Map<string, Entry>();
   private readonly trailLayer: MarkerSet;
+  private readonly entities: EntityLayer;
   private trailDimension: string | null = null;
   private following: string | null = null;
-  private overview: { controls: CameraControls | null; distance: number; angle: number; ortho: number; tilt: number } | null = null;
+  private followView: FollowView = 'first';
+  private readonly followEye = new window.BlueMap!.Three.Vector3();
+  private readonly followDirection = new window.BlueMap!.Three.Vector3();
+  private readonly followRay = new window.BlueMap!.Three.Raycaster();
+  private readonly followHits: Three.Intersection[] = [];
+  private focusGeneration = 0;
   private playerViewControls: CameraControls | null = null;
+  private flightControls: FlightControls | null = null;
   private selected: string | null = null;
   private bubblesEnabled = true;
   private reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   constructor(readonly app: BlueMapApp, readonly onSelect: (id: string) => void, readonly onMap: (id: string) => void, readonly onFollow: (following: boolean) => void) {
     const { MarkerSet } = window.BlueMap!;
+    this.entities = new EntityLayer(app, playerColor);
     this.layer = new MarkerSet('dashboard-players'); this.layer.data.toggleable = false;
     this.trailLayer = new MarkerSet('dashboard-trail'); this.trailLayer.data.toggleable = false;
     // v5.29's normal marker manager preserves this parent through polling and map changes.
@@ -131,8 +153,9 @@ export class SandTableLayer {
     onMap(this.mapId());
   }
   mapId(): string { return this.app.mapViewer.map?.data.id ?? 'overworld'; }
-  sync(players: Player[], chat: ChatMessage[], selected: string | null, now: number, bubblesEnabled: boolean): void {
+  sync(players: Player[], chat: ChatMessage[], selected: string | null, now: number, bubblesEnabled: boolean, entities: WorldEntity[] = []): void {
     this.selected = selected; this.bubblesEnabled = bubblesEnabled;
+    this.entities.sync(players, entities, now);
     const visible = new Set<string>();
     for (const player of players) {
       if (!player.online || !player.position) continue;
@@ -219,6 +242,7 @@ export class SandTableLayer {
       if (collides) entry.bubbles.style.visibility = 'hidden'; else rects.push(rect);
     }
     if (this.following) this.updatePlayerView();
+    this.entities.frame(delta, this.followView === 'first' ? this.following : null);
     if (moving) this.app.mapViewer.redraw();
   }
   private updatePlayerView(): void {
@@ -226,25 +250,57 @@ export class SandTableLayer {
     if (!entry || entry.dimension.replace(/^minecraft:/, '') !== this.mapId()) return;
     const cm = this.app.mapViewer.controlsManager;
     const pos = entry.marker.position;
-    cm.position.set(pos.x, pos.y - markerHeight + eyeHeight, pos.z);
+    this.followEye.set(pos.x, pos.y - markerHeight + eyeHeight, pos.z);
+    const pitch = this.followView === 'third' ? Math.max(-25, Math.min(65, entry.rotation.pitch + 12)) : entry.rotation.pitch;
+    const yaw = entry.rotation.yaw * radians;
+    this.followDirection.set(-Math.sin(yaw) * Math.cos(pitch * radians), -Math.sin(pitch * radians), Math.cos(yaw) * Math.cos(pitch * radians));
+    let distance = this.followView === 'third' ? thirdPersonDistance : 0;
+    const terrain = this.app.mapViewer.map?.hiresTileManager?.scene;
+    if (distance && terrain) {
+      // BlueMap shifts terrain for rendering at large coordinates. Restore world
+      // coordinates before checking the short segment behind the player's eyes.
+      terrain.position.x = 0; terrain.position.z = 0; terrain.updateMatrixWorld();
+      this.followRay.set(this.followEye, this.followDirection); this.followRay.ray.direction.negate();
+      this.followRay.near = 0; this.followRay.far = distance; this.followRay.layers.enableAll();
+      this.followHits.length = 0; this.followRay.intersectObject(terrain, true, this.followHits);
+      if (this.followHits.length) distance = Math.max(0, this.followHits[0].distance - 0.18);
+    }
+    cm.position.set(this.followEye.x - this.followDirection.x * distance, this.followEye.y - this.followDirection.y * distance, this.followEye.z - this.followDirection.z * distance);
     cm.distance = 0; cm.ortho = 0; cm.tilt = 0;
     cm.rotation = (entry.rotation.yaw - 180) * radians;
-    cm.angle = (90 - entry.rotation.pitch) * radians;
+    cm.angle = (90 - pitch) * radians;
     cm.updateCamera();
   }
+  setFollowView(view: FollowView): void {
+    this.followView = view;
+    if (this.following) this.updatePlayerView();
+    this.entities.frame(0, view === 'first' ? this.following : null);
+    this.app.mapViewer.redraw();
+  }
   async focus(player: Player, follow = false): Promise<boolean> {
-    if (!player.position) return false;
+    const generation = ++this.focusGeneration;
+    if (!player.online || !player.position) { this.stopFollowing(); return false; }
     const mapId = player.dimension.replace(/^minecraft:/, '');
-    if (!this.app.mapsMap.has(mapId)) return false;
+    if (!this.app.mapsMap.has(mapId)) { this.stopFollowing(); return false; }
     if (this.mapId() !== mapId) await this.app.switchMap(mapId, false);
+    if (generation !== this.focusGeneration) return false;
     const entry = this.entries.get(player.id);
     const cm = this.app.mapViewer.controlsManager;
     this.stopFollowing();
     if (follow && entry) {
-      this.overview = { controls: cm.controls, distance: Math.max(15, cm.distance), angle: cm.angle, ortho: cm.ortho, tilt: cm.tilt };
-      const controls = cm.controls;
-      // Keep normal input listeners so a drag, wheel or navigation key can hand control back.
-      // Bypass the map controls' terrain-height, minimum-distance and pitch clamps while following.
+      const previous = this.flightControls;
+      if (previous) {
+        if (cm.controls === previous) cm.controls = null;
+        previous.hammer.destroy();
+      }
+      const controls = new window.BlueMap!.FreeFlightControls(this.app.mapViewer.renderer.domElement);
+      // The dashboard uses ordinary mouse/touch input without native fullscreen/pointer lock.
+      controls.onMouseUp = () => {};
+      this.flightControls = controls;
+      this.app.freeFlightControls = controls;
+      this.app.appState.controls.state = 'free';
+      // Keep free-flight input active while the follow camera owns its updates. Ending
+      // follow hands the same inputs the existing pose, including during a drag.
       this.playerViewControls = { data: this.app.mapControls.data,
         start: manager => controls?.start?.(manager), stop: () => controls?.stop?.(), update: () => this.updatePlayerView() };
       cm.controls = this.playerViewControls;
@@ -255,25 +311,33 @@ export class SandTableLayer {
       this.app.mapControls.followPlayerMarker(entry.marker);
       this.updatePlayerView();
     } else {
+      this.useMapControls();
       cm.position.set(player.position.x, player.position.y, player.position.z); cm.distance = 110; cm.angle = Math.PI / 4; cm.ortho = 0; cm.updateCamera();
     }
     this.visibility(); this.app.mapViewer.updateLoadedMapArea();
+    this.entities.frame(0, this.followView === 'first' ? this.following : null);
     this.onFollow(!!(follow && entry));
     this.app.mapViewer.redraw();
     return !!(follow && entry);
   }
   stopFollowing(): void {
+    this.focusGeneration++;
     this.following = null;
     const cm = this.app.mapViewer.controlsManager;
-    if (this.overview) {
-      const view = this.overview;
-      if (cm.controls === this.playerViewControls) cm.controls = view.controls;
-      cm.distance = view.distance; cm.angle = view.angle; cm.ortho = view.ortho; cm.tilt = view.tilt;
-      this.overview = null; this.playerViewControls = null;
-      cm.updateCamera();
-    }
+    if (this.playerViewControls && cm.controls === this.playerViewControls) cm.controls = this.app.freeFlightControls;
+    this.playerViewControls = null;
     this.app.mapControls.stopFollowingPlayerMarker(); this.onFollow(false); this.visibility(); this.app.mapViewer.redraw();
+    this.entities.frame(0, null);
   }
+  private useMapControls(): void {
+    const cm = this.app.mapViewer.controlsManager;
+    if (cm.controls !== this.app.mapControls) {
+      cm.controls = this.app.mapControls;
+      this.app.mapControls.reset();
+    }
+    this.app.appState.controls.state = cm.ortho === 1 ? 'flat' : 'perspective';
+  }
+  dispose(): void { this.flightControls?.stop?.(); this.flightControls?.hammer.destroy(); this.entities.dispose(); }
   async switchMap(id: string): Promise<void> {
     this.stopFollowing();
     if (this.app.mapsMap.has(id)) await this.app.switchMap(id);
@@ -282,9 +346,12 @@ export class SandTableLayer {
   camera(mode: 'top' | 'perspective' | 'in' | 'out'): void {
     this.stopFollowing();
     const cm = this.app.mapViewer.controlsManager;
+    this.useMapControls();
+    if (cm.distance < 15) cm.distance = 110;
     if (mode === 'top') { cm.angle = 0; cm.ortho = 1; }
     else if (mode === 'perspective') { cm.angle = Math.PI / 4; cm.ortho = 0; }
     else cm.distance = Math.min(6000, Math.max(15, cm.distance * (mode === 'in' ? 0.7 : 1.4)));
+    this.app.appState.controls.state = cm.ortho === 1 ? 'flat' : 'perspective';
     cm.updateCamera(); this.app.mapViewer.updateLoadedMapArea(); this.app.mapViewer.redraw();
   }
   trail(points: Array<Position & { dimension: string }>, dimension: string): void {

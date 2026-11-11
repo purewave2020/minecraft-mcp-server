@@ -85,10 +85,10 @@ export class BotConnection {
       if (this.connectTimer) clearTimeout(this.connectTimer);
       this.connectTimer = null;
       const movements = new Movements(bot, minecraftData(bot.version));
-      movements.canDig = false;
-      movements.allow1by1towers = false;
+      movements.canDig = true;
+      movements.allow1by1towers = true;
       movements.allowParkour = false;
-      movements.allowSprinting = false;
+      movements.allowSprinting = true;
       movements.maxDropDown = 2;
       movements.liquidCost = 8;
       bot.pathfinder.setMovements(movements);

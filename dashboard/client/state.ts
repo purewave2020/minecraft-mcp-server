@@ -1,15 +1,18 @@
 import { reactive } from 'vue';
-import type { BackgroundSpeechStatus, ChatMessage, EnvironmentState, MapState, Player } from '../server/types.js';
+import type { BackgroundSpeechStatus, ChatMessage, EnvironmentState, MapState, Player, WorldEntity } from '../server/types.js';
 import { applySpeechStatus } from './chat-speech.js';
+import type { FollowView } from './bluemap.js';
 export interface Activity { id: string; kind: string; text: string; timestamp: number }
 export const state = reactive({
   players: [] as Player[], chat: [] as ChatMessage[], activity: [] as Activity[],
+  entities: [] as WorldEntity[], entitiesAt: 0,
   collector: { connected: false, observedAt: 0, error: null as string | null, parseErrors: 0 },
   metrics: null as Record<string, unknown> | null,
   map: { available: false, syncing: false, snapshotAt: null, syncedAt: null, renderedAt: null, progress: '正在连接世界', error: null, maps: [] } as MapState,
   environment: { timeOfDay: null, timeRate: 0, timeObservedAt: null, weather: null, weatherObservedAt: null } as EnvironmentState,
   streamConnected: false, engineReady: false, currentMap: 'overworld',
   selectedId: localStorage.getItem('minecraft-dashboard-selected'), follow: false,
+  followView: (localStorage.getItem('minecraft-dashboard-follow-view') === 'third' ? 'third' : 'first') as FollowView,
   bubbles: localStorage.getItem('minecraft-dashboard-bubbles') !== 'false',
   now: Date.now(), error: null as string | null
 });
@@ -19,6 +22,7 @@ let serverOffset = 0;
 const seen = new Set<string>();
 function applySnapshot(data: Record<string, unknown>): void {
   state.players = data.players as Player[];
+  state.entities = (data.entities ?? []) as WorldEntity[]; state.entitiesAt = typeof data.now === 'number' ? data.now : 0;
   state.chat = data.chat as ChatMessage[];
   state.activity = data.activity as Activity[];
   state.collector = data.collector as typeof state.collector;
@@ -43,6 +47,10 @@ export async function connect(onMapUpdate: () => void): Promise<void> {
     listen('player.update', (player: Player) => {
       const at = state.players.findIndex(value => value.id === player.id);
       if (at === -1) state.players.push(player); else state.players[at] = player;
+    });
+    listen('world.entities', (value: { entities: WorldEntity[]; observedAt: number }) => {
+      if (value.observedAt < state.entitiesAt) return;
+      state.entities = value.entities; state.entitiesAt = value.observedAt;
     });
     listen('chat.message', (message: ChatMessage) => {
       if (seen.has(message.id)) return; seen.add(message.id);

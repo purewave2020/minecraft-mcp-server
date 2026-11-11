@@ -26,6 +26,7 @@ const app = Fastify({ logger: false, requestTimeout: 15_000 });
 const detailQueries = new Map<string, number>();
 const snapshot = (): Record<string, unknown> => ({
   players: Array.from(world.players.values()).map(player => ({ ...player, inventory: [] })),
+  entities: world.entities.snapshot(),
   chat: store.chats(),
   activity: store.db.prepare("SELECT data FROM events WHERE type='world.event' ORDER BY id DESC LIMIT 30").all().reverse().map(row => JSON.parse(String(row.data))),
   collector: collector.status, metrics: collector.metrics, map: mapWorker.state, environment: { ...world.environment.state },
