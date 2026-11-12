@@ -79,5 +79,10 @@ catch {
   return null;
 } }
 export function proxyStatus() { const pid = listenerPid(); const fingerprint = processInfo(pid); return { observedAt: new Date().toISOString(), listening: !!pid, proxyPid: pid, fingerprint, verified: !!fingerprint && fingerprint.includes('ViaProxy-3.4.15-SNAPSHOT.jar') && fingerprint.includes('127.0.0.1:25568') && fingerprint.includes('192.168.1.3:25565') }; }
+export function cachedProxyStatus() {
+  const state = readJson(path.join(runtime, 'proxy-owner.json'));
+  if (state && Date.now() - Date.parse(state.observedAt) < 15000) return { ...state, cached: true };
+  return { observedAt: state?.observedAt ?? null, listening: false, verified: false, healthy: false, stale: true };
+}
 export function sessionPaths(username) { if (!/^[A-Za-z0-9_]{1,16}$/.test(username))
   throw new Error('Invalid Minecraft username'); const key = username.toLowerCase(); const prefix = key === 'llmbot' ? 'mcp' : key; return { socket: path.join(runtime, key + '-control.sock'), state: path.join(runtime, prefix + '-session.json'), log: path.join(runtime, prefix + '-session.log'), lock: path.join(runtime, 'runtime', 'session-' + key + '.lock'), observer: path.join(runtime, key === 'llmbot' ? 'game-observer.cjs' : key + '-observer.cjs') }; }

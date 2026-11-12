@@ -21,7 +21,7 @@ const store = new Store(path.join(directory, 'dashboard.sqlite'));
 const world = new WorldState(store, botNames);
 const speech = new BackgroundSpeech(store, new Voice4Speech(path.join(directory, 'speech'), process.env.DASHBOARD_OFFLINE === '1' ? 'offline' : process.platform));
 const collector = new Collector(store, world);
-const mapWorker = new MapWorker(directory, store, Number(process.env.DASHBOARD_SYNC_MS ?? 300_000));
+const mapWorker = new MapWorker(directory, store, Number(process.env.DASHBOARD_SYNC_MS ?? 900_000));
 const app = Fastify({ logger: false, requestTimeout: 15_000 });
 const detailQueries = new Map<string, number>();
 const snapshot = (): Record<string, unknown> => ({

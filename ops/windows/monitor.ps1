@@ -1,5 +1,6 @@
 param([string]$ServerRoot='D:\Game\minecraft-java-26.3')
 $ErrorActionPreference='Stop'
+. (Join-Path $PSScriptRoot 'maintenance-common.ps1')
 $directory=Join-Path $ServerRoot 'metrics'
 [IO.Directory]::CreateDirectory($directory)|Out-Null
 $lock=[IO.File]::Open((Join-Path $directory 'monitor.lock'),'OpenOrCreate','ReadWrite','None')
@@ -25,15 +26,15 @@ try {
       Move-Item -LiteralPath $saveGuard -Destination ($saveGuard+'.recovered-'+(Get-Date -Format 'yyyyMMdd-HHmmss'))
     }
   }
-  $pidFile=Join-Path $ServerRoot 'server.pid'
-  $serverProcessId=if(Test-Path $pidFile){[int](Get-Content $pidFile -Raw)}else{0}
-  $java=Get-CimInstance Win32_PerfFormattedData_PerfProc_Process | Where-Object {$_.IDProcess -eq $serverProcessId} | Select-Object -First 1
+  $process=Get-MinecraftServerProcess -ServerRoot $ServerRoot
+  $serverProcessId=if($process){[int]$process.ProcessId}else{0}
+  $java=if($process){Get-CimInstance Win32_PerfFormattedData_PerfProc_Process -Filter ("IDProcess="+$serverProcessId)|Select-Object -First 1}else{$null}
   $os=Get-CimInstance Win32_OperatingSystem
   $cpu=Get-CimInstance Win32_PerfFormattedData_PerfOS_Processor -Filter "Name='_Total'"
   $tick=@{};$tickError=$null
   $log=Join-Path $ServerRoot 'logs\latest.log'
   $offset=if(Test-Path $log){(Get-Item $log).Length}else{0}
-  if($java){
+  if($process){
     try {
       & (Join-Path $ServerRoot 'send-command.ps1') -Command 'tick query' -TimeoutSeconds 5 | Out-Null
       $deadline=[DateTime]::UtcNow.AddSeconds(5)
@@ -47,16 +48,29 @@ try {
       if(-not $tick.ContainsKey('p99Ms')){throw 'tick query response was not confirmed'}
     }catch{$tickError=$_.Exception.Message}
   }
-  $lines=if(Test-Path $log){@(Get-Content -LiteralPath $log -Tail 3000)}else{@()}
-  $minute=(Get-Date).AddMinutes(-1).ToString('HH:mm')
-  $recent=@($lines | Where-Object {$_.StartsWith('['+$minute+':')})
-  $row=[ordered]@{observedAt=$now.ToString('o');running=[bool]$java;serverPid=$serverProcessId;cpuPercent=$cpu.PercentProcessorTime;javaCpuPercent=$java.PercentProcessorTime;javaPrivateBytes=$java.WorkingSetPrivate;freeMemoryKB=$os.FreePhysicalMemory;tick=$tick;tickError=$tickError;lagWarnings=@($recent|Where-Object {$_ -match 'Can.t keep up'}).Count;movementWarnings=@($recent|Where-Object {$_ -match 'moved wrongly|moved too quickly'}).Count;disk=@(Get-CimInstance Win32_PerfFormattedData_PerfDisk_PhysicalDisk|Select-Object Name,CurrentDiskQueueLength,DiskBytesPersec);gcTail=@(Get-ChildItem -LiteralPath (Join-Path $ServerRoot 'logs') -Filter 'gc-*.log' -File|Sort-Object LastWriteTime -Descending|Select-Object -First 1|Get-Content -Tail 8)}
+  $cursorPath=Join-Path $directory 'log-cursor.json'
+  $cursor=if(Test-Path $cursorPath){try{[IO.File]::ReadAllText($cursorPath)|ConvertFrom-Json}catch{$null}}else{$null}
+  $delta=if(Test-Path $log){Read-MinecraftLogDelta -Path $log -Cursor $cursor}else{@{text='';cursor=$null;truncated=$false}}
+  $volumes=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | Select-Object DeviceID,Size,FreeSpace)
+  $alerts=@()
+  if(-not $process){$alerts+=@{code='server-stopped';severity='error'}}
+  if($tickError){$alerts+=@{code='tick-query-failed';severity='error';message=$tickError}}
+  if($tick.ContainsKey('p99Ms') -and ($tick.averageMs -ge 40 -or $tick.p99Ms -ge 100)){$alerts+=@{code='tick-lag';severity='warning'}}
+  foreach($volume in $volumes){if($volume.FreeSpace -lt 15GB -or ($volume.Size -gt 0 -and $volume.FreeSpace/$volume.Size -lt 0.1)){$alerts+=@{code='disk-space-low';severity='warning';drive=$volume.DeviceID;freeBytes=$volume.FreeSpace}}}
+  if($delta.truncated){$alerts+=@{code='log-scan-truncated';severity='warning'}}
+  $healthy=[bool]$process -and -not $tickError -and $tick.ContainsKey('p99Ms')
+  $row=[ordered]@{observedAt=$now.ToString('o');running=[bool]$process;healthy=$healthy;state=$(if(-not $process){'stopped'}elseif(-not $healthy){'unresponsive'}elseif($alerts.Count){'degraded'}else{'healthy'});alerts=$alerts;volumes=$volumes;serverPid=$serverProcessId;cpuPercent=$cpu.PercentProcessorTime;javaCpuPercent=$java.PercentProcessorTime;javaPrivateBytes=$java.WorkingSetPrivate;freeMemoryKB=$os.FreePhysicalMemory;tick=$tick;tickError=$tickError;lagWarnings=[regex]::Matches($delta.text,"Can.t keep up").Count;movementWarnings=[regex]::Matches($delta.text,'moved wrongly|moved too quickly|kicked for floating|standing on air').Count;disk=@(Get-CimInstance Win32_PerfFormattedData_PerfDisk_PhysicalDisk|Select-Object Name,CurrentDiskQueueLength,DiskBytesPersec);gcTail=@(Get-ChildItem -LiteralPath (Join-Path $ServerRoot 'logs') -Filter 'gc-*.log' -File|Sort-Object LastWriteTime -Descending|Select-Object -First 1|Get-Content -Tail 8)}
   $filename=Join-Path $directory ('metrics-'+(Get-Date -Format 'yyyyMMdd')+'.jsonl')
   if((Test-Path $filename) -and (Get-Item $filename).Length -gt 10MB){Move-Item -LiteralPath $filename -Destination ($filename+'.'+(Get-Date -Format 'HHmmss'))}
   [IO.File]::AppendAllText($filename,($row|ConvertTo-Json -Depth 5 -Compress)+[Environment]::NewLine,[Text.UTF8Encoding]::new($false))
-  [IO.File]::WriteAllText((Join-Path $directory 'latest.json'),($row|ConvertTo-Json -Depth 5),[Text.UTF8Encoding]::new($false))
+  Write-MinecraftJson -Path (Join-Path $directory 'latest.json') -Value $row
+  if($delta.cursor){Write-MinecraftJson -Path $cursorPath -Value $delta.cursor}
+  Remove-Item -LiteralPath (Join-Path $directory 'last-error.json') -Force -ErrorAction SilentlyContinue
   Get-ChildItem -LiteralPath $directory -File | Where-Object {$_.Name -like 'metrics-*' -and $_.LastWriteTime -lt (Get-Date).AddDays(-7)} | Remove-Item -Force
   Get-ChildItem -LiteralPath (Join-Path $ServerRoot 'launcher-logs') -File | Where-Object {$_.LastWriteTime -lt (Get-Date).AddDays(-7)} | Remove-Item -Force -ErrorAction Continue
   Get-ChildItem -LiteralPath (Join-Path $ServerRoot 'logs') -Filter 'gc-*.log*' -File | Where-Object {$_.LastWriteTime -lt (Get-Date).AddDays(-7)} | Remove-Item -Force -ErrorAction Continue
   $row|ConvertTo-Json -Depth 5 -Compress
+}catch{
+  Write-MinecraftJson -Path (Join-Path $directory 'last-error.json') -Value @{observedAt=[DateTime]::UtcNow.ToString('o');healthy=$false;error=$_.Exception.Message}
+  throw
 }finally{$lock.Dispose()}

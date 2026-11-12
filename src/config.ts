@@ -6,6 +6,8 @@ export interface ServerConfig {
   port: number;
   username: string;
   version?: string;
+  navigationDig?: boolean;
+  navigationTower?: boolean;
 }
 
 export function parseConfig(): ServerConfig {
@@ -29,6 +31,8 @@ export function parseConfig(): ServerConfig {
       type: 'string',
       description: 'Minecraft client protocol version (auto-detected by default; set when using a protocol proxy)'
     })
+    .option('navigation-dig', { type: 'boolean', default: false, description: 'Allow pathfinding to dig blocks' })
+    .option('navigation-tower', { type: 'boolean', default: false, description: 'Allow pathfinding to build vertical towers' })
     .help()
     .alias('help', 'h')
     .parseSync();
@@ -37,6 +41,8 @@ export function parseConfig(): ServerConfig {
     host: args.host,
     port: args.port,
     username: args.username,
-    version: args['minecraft-version']
+    version: args['minecraft-version'],
+    navigationDig: args['navigation-dig'],
+    navigationTower: args['navigation-tower']
   };
 }

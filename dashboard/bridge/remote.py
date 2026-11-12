@@ -61,7 +61,8 @@ def configuration():
     path = DATA / 'config.json'
     default = {'serverRoot': 'D:\\Game\\minecraft-java-26.3',
                'backupRoot': 'E:\\MinecraftBackups\\minecraft-java-26.3',
-               'positionIntervalMs': 2500}
+               'positionIntervalMs': 2500, 'entityIntervalSeconds': 5,
+               'fullPlayerIntervalSeconds': 120, 'snapshotMinimumSeconds': 900}
     return {**default, **(json.loads(path.read_text()) if path.exists() else {})}
 
 
@@ -106,7 +107,8 @@ def snapshot():
         if local_file.is_file() and file_hash(local_file) == entry['sha256']:
             cached[entry['path']] = entry['sha256']
     request = {**configuration(), 'manifest': cached}
-    result = powershell((BRIDGE / 'snapshot.ps1').read_text(), request, output=subprocess.PIPE, timeout=120)
+    script = (BRIDGE / 'snapshot-policy.ps1').read_text() + '\n' + (BRIDGE / 'snapshot.ps1').read_text()
+    result = powershell(script, request, output=subprocess.PIPE, timeout=120)
     lines = result.stdout.decode('utf-8-sig').splitlines()
     export = next((json.loads(line) for line in reversed(lines) if line.startswith('{') and 'archive' in line), None)
     if not export:

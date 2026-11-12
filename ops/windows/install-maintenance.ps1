@@ -3,13 +3,16 @@ $ErrorActionPreference='Stop'
 $stamp=Get-Date -Format 'yyyyMMdd-HHmmss'
 $backup=Join-Path $ServerRoot ('backups\maintenance-'+$stamp)
 [IO.Directory]::CreateDirectory($backup)|Out-Null
-foreach($name in @('start.ps1','server.properties')){Copy-Item -LiteralPath (Join-Path $ServerRoot $name) -Destination $backup}
-foreach($name in @('backup-world.ps1','monitor.ps1','rolling-log.ps1')){
+foreach($name in @('start.ps1','server.properties','monitor.ps1','backup-world.ps1','rolling-log.ps1')){Copy-Item -LiteralPath (Join-Path $ServerRoot $name) -Destination $backup}
+foreach($name in @('maintenance-common.ps1','backup-world.ps1','monitor.ps1','rolling-log.ps1')){
  $file=Join-Path $Source $name
  $tokens=$null;$errors=$null
  [void][Management.Automation.Language.Parser]::ParseFile($file,[ref]$tokens,[ref]$errors)
  if($errors.Count){throw ('PowerShell syntax errors: '+($errors|Out-String))}
- Copy-Item -LiteralPath $file -Destination (Join-Path $ServerRoot $name) -Force
+}
+& (Join-Path $Source 'test-maintenance.ps1') -Source $Source | Out-Null
+foreach($name in @('maintenance-common.ps1','backup-world.ps1','monitor.ps1','rolling-log.ps1')){
+ Copy-Item -LiteralPath (Join-Path $Source $name) -Destination (Join-Path $ServerRoot $name) -Force
 }
 $startPath=Join-Path $ServerRoot 'start.ps1'
 $start=[IO.File]::ReadAllText($startPath)

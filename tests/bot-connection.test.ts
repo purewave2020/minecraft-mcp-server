@@ -253,3 +253,19 @@ test('chat from a replaced bot connection cannot enter the current history', t =
 
   t.true(onChatMessage.calledOnceWithExactly('GPTBot', '当前消息'));
 });
+
+test('kick diagnosis survives the follow-up socket error and generic quit event', t => {
+  const connection = new BotConnection({ host: 'localhost', port: 0, username: 'AuditFake' }, { onLog: () => {}, onChatMessage: () => {} });
+  const bot = Object.assign(new EventEmitter(), { quit: sinon.stub() });
+  const internals = connection as unknown as { bot: unknown; registerEventHandlers: (bot: unknown) => void };
+  internals.bot = bot; internals.registerEventHandlers(bot);
+  bot.emit('kicked', 'Connect failed: AnnotatedNoRouteToHostException');
+  bot.emit('error', new Error('read ECONNRESET'));
+  bot.emit('end', 'disconnect.quitting');
+  const status = connection.getStatus();
+  t.regex(String(status.lastDisconnect), /NoRouteToHost/);
+  t.deepEqual((status.lastError as { reason: string }).reason, 'read ECONNRESET');
+  t.regex((status.lastEnd as { reason: string }).reason, /disconnect.quitting/);
+  t.is(status.disconnectCount, 1);
+  connection.cleanup();
+});

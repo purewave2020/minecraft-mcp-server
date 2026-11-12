@@ -60,3 +60,34 @@ test('a rejected duplicate session leaves the existing control socket intact', a
       fs.rmSync(filename, { force: true });
   }
 });
+
+test('Minecraft health probe requires a valid status response and tolerates fragmented packets', async () => {
+  const { probeServer, varInt } = await import('../scripts/runtime/server-probe.mjs');
+  const server = net.createServer(socket => socket.once('data', () => {
+    const json = Buffer.from(JSON.stringify({ version: { protocol: 777, name: 'test' }, players: { online: 0, max: 20 } }));
+    const body = Buffer.concat([varInt(0), varInt(json.length), json]);
+    const packet = Buffer.concat([varInt(body.length), body]);
+    socket.write(packet.subarray(0, 2));
+    setImmediate(() => socket.end(packet.subarray(2)));
+  }));
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const result = await probeServer('127.0.0.1', server.address().port);
+    assert.equal(result.healthy, true); assert.equal(result.version.protocol, 777);
+  } finally { await new Promise(resolve => server.close(resolve)); }
+  const silent = net.createServer(socket => socket.resume());
+  await new Promise(resolve => silent.listen(0, '127.0.0.1', resolve));
+  try { assert.equal((await probeServer('127.0.0.1', silent.address().port, 30)).healthy, false); }
+  finally { await new Promise(resolve => silent.close(resolve)); }
+});
+
+test('proxy recovery cannot interrupt connected or unverified sessions and is rate limited', async () => {
+  const { recoveryReason } = await import('../scripts/runtime/server-probe.mjs');
+  const state = { proxy: { healthy: false }, direct: { healthy: true }, sessions: [{ connected: false, fresh: true }], failures: 4, elapsedMs: 70000, cooldownMs: 400000 };
+  assert.ok(recoveryReason(state));
+  assert.equal(recoveryReason({ ...state, sessions: [{ connected: true, fresh: true }] }), null);
+  assert.equal(recoveryReason({ ...state, sessions: [{ connected: false, fresh: false }] }), null);
+  assert.equal(recoveryReason({ ...state, direct: { healthy: false } }), null);
+  assert.equal(recoveryReason({ ...state, cooldownMs: 30000 }), null);
+  assert.equal(recoveryReason({ ...state, sessions: [] }), null);
+});

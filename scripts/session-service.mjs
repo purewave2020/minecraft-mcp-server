@@ -4,7 +4,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { root, runtime, node, writeJson, readJson, lock, sessionPaths, proxyStatus, appendLog } from './runtime/common.mjs';
+import { root, runtime, node, writeJson, readJson, lock, sessionPaths, cachedProxyStatus as proxyStatus, appendLog } from './runtime/common.mjs';
 import { ensureProxy } from './proxy-service.mjs';
 import { authorizeRequest } from './runtime/controller.mjs';
 const username = process.argv[2] ?? 'LLMBot';

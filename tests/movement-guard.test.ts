@@ -38,3 +38,21 @@ test('unloaded chunks stop movement and guard listeners are removed on disconnec
   t.is(bot.listenerCount('physicsTick'), 0);
   t.is(bot.listenerCount('forcedMove'), 0);
 });
+
+test.serial('sustained unsupported hovering cancels movement while a normal fall does not', async t => {
+  const clock = sinon.useFakeTimers();
+  t.teardown(() => clock.restore());
+  const { actions, bot, getBot } = setup();
+  bot.blockAt.returns({ name: 'air', boundingBox: 'empty' });
+  const move = actions.run('move-to-position', getBot, () => actionDelay(10000));
+  const failed = t.throwsAsync(move, { message: /unsupported hovering/ });
+  await clock.tickAsync(1);
+  bot.emit('physicsTick');
+  bot.entity.position.y--;
+  await clock.tickAsync(2200); bot.emit('physicsTick');
+  t.is(actions.currentAction, 'move-to-position');
+  await clock.tickAsync(1); bot.emit('physicsTick');
+  await clock.tickAsync(2100); bot.emit('physicsTick');
+  await failed;
+  t.is((movementStatus(getBot()) as { floatingStops: number }).floatingStops, 1);
+});

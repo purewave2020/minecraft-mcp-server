@@ -96,11 +96,11 @@ try {
       $commands+='execute as @a run data get entity @s foodLevel'
       $lastStatus=$now
     }
-    if(($now-$lastFull).TotalSeconds -ge 30) {
+    if(($now-$lastFull).TotalSeconds -ge [Math]::Max(60,$DashboardRequest.fullPlayerIntervalSeconds)) {
       $commands+='execute as @a run data get entity @s'
       $lastFull=$now
     }
-    if(($now-$lastEntities).TotalSeconds -ge 3) {
+    if(($now-$lastEntities).TotalSeconds -ge [Math]::Max(5,$DashboardRequest.entityIntervalSeconds)) {
       foreach($dimension in @('overworld','the_nether','the_end')) {
         # Read-only storage boundaries delimit complete, possibly empty entity snapshots.
         $entityCommands+='data get storage minecraft_dashboard:entities_'+$dimension+'_begin'

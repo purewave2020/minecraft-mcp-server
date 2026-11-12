@@ -24,3 +24,7 @@ pids/
 # Claude Code configuration
 .claude
 .idea
+
+# Python bytecode
+__pycache__/
+*.py[cod]

@@ -11,8 +11,9 @@ export class MapWorker {
   private timer: NodeJS.Timeout | null = null;
   private child: ChildProcess | null = null;
   private busy = false;
+  private failures = 0;
   readonly state: MapState;
-  constructor(readonly directory: string, readonly store: Store, readonly interval = 300_000) {
+  constructor(readonly directory: string, readonly store: Store, readonly interval = 900_000) {
     this.state = { available: fs.existsSync(path.join(directory, 'web/index.html')), syncing: false,
       snapshotAt: null, syncedAt: null, renderedAt: null, progress: '准备同步真实世界', error: null, maps: [], ...store.meta('mapState', {}) };
     this.state.syncing = false;
@@ -72,12 +73,14 @@ export class MapWorker {
         return !fs.existsSync(path.join(root, 'settings.json')) || !fs.existsSync(path.join(root, 'textures.json.gz')) || !fs.existsSync(path.join(root, 'tiles'));
       })) throw new Error('三维地图数据不完整，保留上次视图');
       this.state.available = true; this.state.renderedAt = new Date().toISOString(); this.state.progress = '地图已更新';
+      this.failures = 0;
       this.store.event('map.updated', { renderedAt: this.state.renderedAt, snapshotAt: this.state.snapshotAt });
     } catch (error) {
+      this.failures++;
       this.state.error = error instanceof Error ? error.message : String(error);
     } finally {
       this.state.syncing = false; this.busy = false; this.publish();
-      if (!this.stopped) this.timer = setTimeout(() => void this.cycle(), this.interval);
+      if (!this.stopped) this.timer = setTimeout(() => void this.cycle(), Math.min(3_600_000, Math.max(900_000, this.interval) * 2 ** Math.min(this.failures, 2)));
     }
   }
   async stop(): Promise<void> {

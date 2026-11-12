@@ -8,7 +8,7 @@ import { identityKey, runtimeDirectory, writePrivateJson } from './runtime-state
 const { pathfinder, Movements } = pathfinderPkg;
 const SUPPORTED_MINECRAFT_VERSION = mineflayer.latestSupportedVersion;
 type ConnectionState = 'connected' | 'connecting' | 'disconnected';
-interface BotConfig { host: string; port: number; username: string; version?: string; }
+interface BotConfig { host: string; port: number; username: string; version?: string; navigationDig?: boolean; navigationTower?: boolean; }
 interface ConnectionCallbacks {
   onLog: (level: string, message: string) => void;
   onChatMessage: (username: string, message: string) => void;
@@ -25,6 +25,11 @@ export class BotConnection {
   private blockedReason?: string;
   private lastDisconnect?: string;
   private connectedAt?: string;
+  private lastKick?: { reason: string; at: string };
+  private lastError?: { reason: string; at: string };
+  private lastEnd?: { reason: string; at: string };
+  private disconnectCount = 0;
+  private connectionFailure?: string;
   private spawnListeners = new Set<(bot: mineflayer.Bot) => void>();
 
   constructor(private config: BotConfig, private callbacks: ConnectionCallbacks, private readonly reconnectDelayMs = 2000) {}
@@ -41,7 +46,9 @@ export class BotConnection {
     return { observedAt: new Date().toISOString(), username: this.config.username, state: this.state,
       connected: this.isConnected(), protocolState: this.bot?._client.state, connectedAt: this.connectedAt,
       lastDisconnect: this.lastDisconnect, reconnectPending: this.reconnectTimer !== null,
-      failures: this.failures, blockedReason: this.blockedReason };
+      failures: this.failures, blockedReason: this.blockedReason, lastKick: this.lastKick,
+      lastError: this.lastError, lastEnd: this.lastEnd, disconnectCount: this.disconnectCount,
+      navigation: { canDig: this.config.navigationDig === true, allow1by1towers: this.config.navigationTower === true } };
   }
   getPreference<T>(key: string, fallback: T): T {
     try { return JSON.parse(fs.readFileSync(this.preferencePath(), 'utf8'))[key] ?? fallback; }
@@ -58,8 +65,10 @@ export class BotConnection {
     if (this.stopped || this.bot) return;
     this.state = 'connecting';
     this.isReconnecting = false;
+    this.connectionFailure = undefined;
     try {
-      const bot = mineflayer.createBot({ ...this.config, plugins: { pathfinder } });
+      const { host, port, username, version } = this.config;
+      const bot = mineflayer.createBot({ host, port, username, version, plugins: { pathfinder } });
       this.bot = bot;
       this.registerEventHandlers(bot);
       this.connectTimer = setTimeout(() => {
@@ -85,8 +94,8 @@ export class BotConnection {
       if (this.connectTimer) clearTimeout(this.connectTimer);
       this.connectTimer = null;
       const movements = new Movements(bot, minecraftData(bot.version));
-      movements.canDig = true;
-      movements.allow1by1towers = true;
+      movements.canDig = this.config.navigationDig === true;
+      movements.allow1by1towers = this.config.navigationTower === true;
       movements.allowParkour = false;
       movements.allowSprinting = true;
       movements.maxDropDown = 2;
@@ -109,6 +118,8 @@ export class BotConnection {
     bot.on('kicked', reason => {
       if (this.bot !== bot) return;
       this.lastDisconnect = this.formatError(reason);
+      this.connectionFailure = this.lastDisconnect;
+      this.lastKick = { reason: this.lastDisconnect, at: new Date().toISOString() };
       if (/duplicate_login|logged in from another location/i.test(this.lastDisconnect)) {
         this.blockedReason = 'Duplicate identity login detected; explicit controller handoff is required';
       }
@@ -117,8 +128,11 @@ export class BotConnection {
     });
     bot.on('error', error => {
       if (this.bot !== bot) return;
-      this.lastDisconnect = this.formatError(error);
-      this.callbacks.onLog('error', `Bot error: ${this.lastDisconnect}`);
+      const reason = this.formatError(error);
+      this.lastError = { reason, at: new Date().toISOString() };
+      this.connectionFailure ??= reason;
+      this.lastDisconnect = this.connectionFailure;
+      this.callbacks.onLog('error', `Bot error: ${reason}`);
     });
     bot.on('end', reason => {
       if (this.bot !== bot) return;
@@ -127,8 +141,10 @@ export class BotConnection {
       this.bot = null;
       this.state = 'disconnected';
       this.connectedAt = undefined;
-      this.lastDisconnect = this.formatError(reason);
-      this.callbacks.onLog('info', `Bot disconnected: ${this.lastDisconnect}`);
+      this.disconnectCount++;
+      this.lastEnd = { reason: this.formatError(reason), at: new Date().toISOString() };
+      this.lastDisconnect = this.connectionFailure ?? this.lastEnd.reason;
+      this.callbacks.onLog('info', `Bot disconnected: ${this.lastDisconnect}; transport end: ${this.lastEnd.reason}`);
       // Leave plugin end listeners intact so their timers and promises are cleaned up.
       this.attemptReconnect();
     });
