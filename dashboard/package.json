@@ -16,6 +16,7 @@
     "test": "tsx --test tests/*.test.ts && python3 -m unittest discover -s bridge -p 'test_*.py'",
     "lint": "eslint .",
     "test:browser": "node tests/browser-smoke.mjs",
+    "test:chat-browser": "node tests/chat-browser.mjs",
     "test:follow-browser": "node tests/follow-browser.mjs",
     "test:entities-browser": "node tests/entities-browser.mjs",
     "test:speech-browser": "node tests/speech-browser.mjs",

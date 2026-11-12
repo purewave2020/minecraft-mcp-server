@@ -12,6 +12,31 @@ import zipfile
 import remote
 
 
+class ChatTests(unittest.TestCase):
+    def test_chat_text_is_literal_json_with_fixed_sender(self):
+        content = '/op @a 中文 😀 " \' $(Get-Secret) <img src=x>'
+        with patch.object(remote, 'powershell', return_value=subprocess.CompletedProcess([], 0, b'{"status":"sent","username":"qingyage"}')) as transport:
+            with patch('sys.stdout', new_callable=io.StringIO):
+                remote.send_chat(content)
+        script, request = transport.call_args.args
+        self.assertNotIn(content, script)
+        self.assertTrue(request['component'].isascii(), 'Windows console transport must not corrupt Chinese or emoji')
+        self.assertEqual(json.loads(request['component']), {
+            'translate': 'chat.type.text', 'with': [{'text': 'qingyage'}, {'text': content}]})
+
+    def test_invalid_chat_is_rejected_before_ssh(self):
+        with patch.object(remote, 'powershell') as transport:
+            for content in [None, '', ' ', 'x' * 257, '😀' * 129, 'a\nb', 'a\x00b', '§c红色']:
+                with self.assertRaises(ValueError):
+                    remote.send_chat(content)
+            transport.assert_not_called()
+
+    def test_dispatch_receipt_is_not_a_delivery_confirmation(self):
+        with patch.object(remote, 'powershell', return_value=subprocess.CompletedProcess([], 0, b'{"status":"dispatched"}')):
+            with self.assertRaisesRegex(RuntimeError, 'not confirmed'):
+                remote.send_chat('test')
+
+
 class SnapshotTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

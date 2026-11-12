@@ -1,0 +1,17 @@
+betterproto==2.0.0b6
+certifi==2026.10.23
+charset-normalizer==3.5.2
+grpclib==0.4.9
+h2==4.4.1
+hpack==4.2.0
+hyperframe==6.1.0
+idna==3.20
+mini-racer==0.12.4
+multidict==7.1.0
+pyexecjs==1.5.1
+python-dateutil==2.9.0.post0
+requests==2.31.0
+six==1.17.0
+typing-extensions==4.16.0
+urllib3==2.8.0
+websocket-client==1.7.0

@@ -36,6 +36,7 @@ test('isolated HTTP service authenticates every route and serves player details 
     }
     assert.equal((await fetch(base + '/api/speech', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: false }) })).status, 401);
     assert.equal((await fetch(base + '/api/speech/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'a', text: 'test' }) })).status, 401);
+    assert.equal((await fetch(base + '/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: 'test' }) })).status, 401);
     assert.equal((await fetch(base + '/health', { headers })).status, 200);
     const snapshot = await fetch(base + '/api/snapshot', { headers }).then(response => response.json());
     assert.equal(snapshot.collector.connected, false); assert.equal(snapshot.players.length, 1);
@@ -46,6 +47,16 @@ test('isolated HTTP service authenticates every route and serves player details 
     const detail = await fetch(base + '/api/players/' + player.id, { headers }).then(response => response.json());
     assert.equal(detail.name, 'Fixture'); assert.equal(detail.inventory[0].count, 3);
     assert.deepEqual(detail.rotation, snapshot.players[0].rotation);
+    const postChat = (body: unknown, extraHeaders = {}) => fetch(base + '/api/chat', {
+      method: 'POST', headers: { ...headers, 'Content-Type': 'application/json', ...extraHeaders }, body: JSON.stringify(body)
+    });
+    for (const body of [null, {}, { content: 1 }, { content: ' ' }, { content: 'x'.repeat(257) }, { content: 'a\nb' }]) {
+      assert.equal((await postChat(body)).status, 400);
+    }
+    assert.equal((await postChat({ content: 'test' }, { Origin: 'https://other.example' })).status, 403);
+    assert.equal((await postChat({ content: 'test' }, { 'Sec-Fetch-Site': 'cross-site' })).status, 403);
+    assert.equal((await postChat({ content: 'test' }, { Origin: base })).status, 503, 'offline tests must never send game chat');
+    assert.deepEqual((await fetch(base + '/api/snapshot', { headers }).then(response => response.json())).chat, []);
     const postSpeech = (body: unknown) => fetch(base + '/api/speech', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     for (const body of [{}, { enabled: 'false' }, null]) assert.equal((await postSpeech(body)).status, 400);
     assert.equal((await postSpeech({ enabled: true })).status, 503, 'offline tests must not access real audio');

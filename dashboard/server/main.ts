@@ -10,6 +10,7 @@ import { MapWorker } from './map-worker.js';
 import { streamEvents } from './stream-events.js';
 import { Voice4Speech } from './voice4-speech.js';
 import { BackgroundSpeech } from './background-speech.js';
+import { ChatSender, ChatSendError, chatContent } from './chat-sender.js';
 
 process.umask(0o077);
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -21,6 +22,7 @@ const store = new Store(path.join(directory, 'dashboard.sqlite'));
 const world = new WorldState(store, botNames);
 const speech = new BackgroundSpeech(store, new Voice4Speech(path.join(directory, 'speech'), process.env.DASHBOARD_OFFLINE === '1' ? 'offline' : process.platform));
 const collector = new Collector(store, world);
+const chatSender = new ChatSender(store);
 const mapWorker = new MapWorker(directory, store, Number(process.env.DASHBOARD_SYNC_MS ?? 900_000));
 const app = Fastify({ logger: false, requestTimeout: 15_000 });
 const detailQueries = new Map<string, number>();
@@ -44,6 +46,23 @@ app.addHook('onRequest', async (request, reply) => {
 app.get('/', (_request, reply) => reply.redirect('/map/'));
 app.get('/health', () => ({ ok: true, collector: collector.status, mapAvailable: mapWorker.state.available }));
 app.get('/api/snapshot', () => snapshot());
+app.post<{ Body: { content?: unknown } }>('/api/chat', async (request, reply) => {
+  // Browsers may only send from this dashboard, including on a passwordless loopback deployment.
+  const origin = request.headers.origin;
+  if (request.headers['sec-fetch-site'] === 'cross-site' || (origin && origin !== `${request.protocol}://${request.host}`)) {
+    return reply.code(403).send({ error: '请从当前面板发送聊天' });
+  }
+  try {
+    const content = chatContent(request.body?.content);
+    if (process.env.DASHBOARD_OFFLINE === '1' || !collector.status.connected || Date.now() - collector.status.observedAt > 20_000) {
+      return reply.code(503).send({ error: '服务器连接中断，请稍后重试' });
+    }
+    return reply.code(201).send(await chatSender.send(content));
+  } catch (error) {
+    if (error instanceof ChatSendError) return reply.code(error.statusCode).send({ error: error.message });
+    throw error;
+  }
+});
 app.get('/api/speech/status', () => speech.status);
 app.post<{ Body: { enabled?: unknown } }>('/api/speech', async (request, reply) => {
   const enabled = request.body?.enabled;
@@ -117,7 +136,7 @@ if (process.env.DASHBOARD_SKIP_RENDER !== '1') void mapWorker.cycle(!fs.existsSy
 let stopping = false;
 async function stop(): Promise<void> {
   if (stopping) return; stopping = true;
-  clearInterval(prune); collector.stop(); await Promise.all([mapWorker.stop(), speech.stop()]);
+  clearInterval(prune); collector.stop(); chatSender.stop(); await Promise.all([mapWorker.stop(), speech.stop()]);
   app.server.closeAllConnections(); await app.close(); store.close();
 }
 process.once('SIGTERM', () => { void stop().then(() => process.exit(0)); });

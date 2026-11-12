@@ -66,6 +66,23 @@ def configuration():
     return {**default, **(json.loads(path.read_text()) if path.exists() else {})}
 
 
+def send_chat(content):
+    if (not isinstance(content, str) or not content.strip()
+            or len(content.encode('utf-16-le')) // 2 > 256
+            or any(ord(char) < 32 or 127 <= ord(char) <= 159
+                   or char in '\u00a7\u2028\u2029' for char in content)):
+        raise ValueError('Invalid chat content')
+    component = {'translate': 'chat.type.text', 'with': [{'text': 'qingyage'}, {'text': content.strip()}]}
+    # The Windows Java console is not a UTF-8 transport. Keep commands ASCII and
+    # let Minecraft's JSON decoder restore Chinese and emoji from Unicode escapes.
+    request = {**configuration(), 'component': json.dumps(component, ensure_ascii=True, separators=(',', ':'))}
+    result = powershell((BRIDGE / 'chat.ps1').read_text(), request, output=subprocess.PIPE, timeout=18)
+    receipt = json.loads(result.stdout.decode('utf-8-sig').strip())
+    if receipt.get('status') != 'sent' or receipt.get('username') != 'qingyage':
+        raise RuntimeError('Chat delivery was not confirmed')
+    print(json.dumps(receipt))
+
+
 def powershell(script, request=None, output=None, timeout=None):
     config = json.loads(CREDENTIALS.read_text())['ssh']
     request_text = json.dumps(request or configuration(), ensure_ascii=True)
@@ -242,12 +259,14 @@ def update(sync=True):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('mode', choices=['live', 'snapshot', 'setup', 'configure', 'update', 'query'])
+    parser.add_argument('mode', choices=['live', 'snapshot', 'setup', 'configure', 'update', 'query', 'chat'])
     parser.add_argument('--cursor')
     parser.add_argument('--username')
     parser.add_argument('--no-sync', action='store_true')
     args = parser.parse_args()
-    if args.mode == 'live':
+    if args.mode == 'chat':
+        send_chat(json.load(sys.stdin).get('content'))
+    elif args.mode == 'live':
         request = configuration()
         if args.cursor:
             request['cursor'] = json.loads(args.cursor)

@@ -5,11 +5,18 @@ import { speechState, toggleSpeech } from './chat-speech.js';
 import { avatar, playerColor } from './bluemap.js';
 import { changeCamera, changeFollowView, changeMap, focusPlayer, refreshMap, selectPlayer, showTrail, stopFollowing } from './main.js';
 import type { Player } from '../server/types.js';
+import { CHAT_MAX_LENGTH, CHAT_USERNAME } from '../server/types.js';
 import { environmentView } from './environment-model.js';
 
 const playersOpen = ref(window.innerWidth >= 760);
 const chatOpen = ref(window.innerWidth >= 1000);
 const activeFeed = ref<'chat' | 'activity'>('chat');
+const chatDraft = ref('');
+const chatSending = ref(false);
+const chatComposing = ref(false);
+const chatError = ref<string | null>(null);
+const chatSent = ref(false);
+const chatInput = ref<HTMLInputElement | null>(null);
 const filter = ref('all');
 const trail = ref(false);
 const detail = ref<Player | null>(null);
@@ -61,6 +68,29 @@ async function follow(): Promise<void> {
   if (state.follow) stopFollowing(); else await focusPlayer(selected.value, true);
 }
 function toggleBubbles(): void { localStorage.setItem('minecraft-dashboard-bubbles', String(state.bubbles)); }
+async function sendChat(): Promise<void> {
+  if (chatSending.value || chatComposing.value || !chatDraft.value.trim() || !live.value) return;
+  const draft = chatDraft.value;
+  chatSending.value = true; chatError.value = null; chatSent.value = false;
+  try {
+    const response = await fetch('/api/chat', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: draft }), signal: AbortSignal.timeout(25_000)
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error ?? '聊天发送失败，请稍后重试');
+    if (chatDraft.value === draft) chatDraft.value = '';
+    chatSent.value = true;
+  } catch (error) {
+    chatError.value = error instanceof Error && error.name !== 'TimeoutError' && error.name !== 'TypeError'
+      ? error.message : '未能确认发送结果，请先检查游戏聊天记录再重试';
+  } finally { chatSending.value = false; chatInput.value?.focus(); }
+}
+function chatKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'Enter' || event.isComposing || event.keyCode === 229) return;
+  event.preventDefault(); void sendChat();
+}
+watch(chatDraft, () => { chatError.value = null; chatSent.value = false; }, { flush: 'sync' });
 let detailTimer: ReturnType<typeof setInterval> | null = null;
 let requestGeneration = 0;
 async function loadDetail(): Promise<void> {
@@ -145,6 +175,14 @@ onUnmounted(() => { if (detailTimer) clearInterval(detailTimer); });
       <div class="md-feed-heading"><div class="md-feed-tabs"><button :class="{ active: activeFeed === 'chat' }" @click="activeFeed = 'chat'">公共聊天</button><button :class="{ active: activeFeed === 'activity' }" @click="activeFeed = 'activity'">世界动态</button></div><button class="md-icon-button" aria-label="收起聊天记录" @click="chatOpen = false">−</button></div>
       <div v-if="activeFeed === 'chat'" class="md-feed-list"><article v-for="message in chats" :key="message.id" class="md-message"><div><button :style="{ color: playerColor(message.username) }" @click="message.playerId && selectPlayer(message.playerId)">{{ message.username }}</button><time>{{ time(message.timestamp) }}</time></div><p>{{ message.content }}</p></article><div v-if="!chats.length" class="md-empty">玩家发言后会在沙盘冒泡，也会记录在这里</div></div>
       <div v-else class="md-feed-list"><article v-for="event in activities" :key="event.id" class="md-activity"><time>{{ time(event.timestamp) }}</time><p>{{ event.text }}</p></article><div v-if="!activities.length" class="md-empty">暂无新的世界动态</div></div>
+      <form v-if="activeFeed === 'chat'" class="md-chat-composer" @submit.prevent="sendChat" @keydown.stop @keyup.stop>
+        <label for="md-chat-input" class="md-chat-identity">发送身份 <strong>{{ CHAT_USERNAME }}</strong><span>{{ chatDraft.length }}/{{ CHAT_MAX_LENGTH }}</span></label>
+        <div class="md-chat-input-row">
+          <input id="md-chat-input" ref="chatInput" v-model="chatDraft" type="text" name="message" :maxlength="CHAT_MAX_LENGTH" autocomplete="off" placeholder="输入聊天内容…" aria-label="聊天内容" :aria-describedby="'md-chat-status'" :readonly="chatSending" enterkeyhint="send" @keydown="chatKeydown" @compositionstart="chatComposing = true" @compositionend="chatComposing = false" />
+          <button type="submit" :disabled="chatSending || !chatDraft.trim() || !live">{{ chatSending ? '发送中…' : '发送' }}</button>
+        </div>
+        <div id="md-chat-status" class="md-chat-status" :class="{ error: chatError }" role="status" aria-live="polite">{{ chatError ?? (!live ? '服务器连接中断，恢复后可发送' : chatSent ? '已发送' : 'Enter 发送') }}</div>
+      </form>
       <label class="md-checkbox md-bubble-toggle"><input v-model="state.bubbles" type="checkbox" @change="toggleBubbles" />显示玩家头顶聊天气泡<span>8 秒</span></label>
     </aside>
     <button v-else class="md-floating md-open-chat" @click="chatOpen = true">▤ 聊天 <span v-if="state.chat.length">{{ state.chat.length }}</span></button>

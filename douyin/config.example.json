@@ -1,0 +1,18 @@
+{
+  "live_id": "",
+  "cookie_file": ".local/cookie.txt",
+  "chat_only": true,
+  "reconnect_seconds": 5,
+  "reply": {
+    "enabled": true,
+    "codex_command": "codex",
+    "model": "gpt-6.1-terra",
+    "reasoning_effort": "medium",
+    "timeout_seconds": 45,
+    "max_pending": 8,
+    "max_message_age_seconds": 90,
+    "max_reply_chars": 160,
+    "game_state_max_age_seconds": 20,
+    "dashboard_url": "http://127.0.0.1:18100"
+  }
+}

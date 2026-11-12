@@ -1,3 +1,6 @@
+export const CHAT_USERNAME = 'qingyage';
+export const CHAT_MAX_LENGTH = 256;
+
 export interface Position { x: number; y: number; z: number }
 export interface Rotation { yaw: number; pitch: number }
 export interface WorldEntity {
